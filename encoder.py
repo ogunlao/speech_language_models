@@ -2,6 +2,9 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+torch.manual_seed(0)
 
 class ConvLayer(nn.Module):
     def __init__(self, in_channels:int, out_channels:int, kernel_size:int, stride:int, padding:str="valid"):
@@ -36,8 +39,7 @@ class Encoder(nn.Module):
             self.linear = nn.Sequential(
                 nn.Linear(512, 512),
                 nn.Linear(512, 512),
-            )
-            
+            )  
         
     def forward(self, x):
         x = self.layer0(x)
@@ -50,6 +52,7 @@ class Encoder(nn.Module):
             x = torch.transpose(x, 2, 1)
         
         return x
+    
     
 class Context(nn.Module):
     
@@ -85,3 +88,56 @@ class Wav2VecFeatureExtractor(nn.Module):
         c = self.context(z)
         
         return z, c
+    
+
+class Wav2VecLoss(nn.Module):
+    def __init__(self, k_steps:int, num_neg:int):
+        super().__init__()
+        self.k_steps = k_steps
+        self.num_neg = num_neg
+        self.linear = nn.Linear(512, 512, bias=True)
+        
+    def forward(self, feat_enc:Encoder, feat_context:Context) -> torch.tensor:
+        feat_context = torch.transpose(feat_context, 2, 1)
+        feat_context = self.linear(feat_context)
+        feat_context = torch.transpose(feat_context, 2, 1)
+        
+        loss = self.compute_contrastive_loss(feat_enc, feat_context,)
+        return loss
+        
+    def compute_contrastive_loss(self, z:torch.tensor, c:torch.tensor,): 
+        # num_neg is same as lambda_
+        # z, c -> batch, channel, time
+        sample_len = z.size()[2]
+        total_loss = 0.0 
+        cont_matrix = z.transpose(1, 2) @ c
+        for k in range(self.k_steps):
+            pos = torch.diagonal(cont_matrix, offset=-1*k, dim1=1, dim2=2)
+            pos = F.logsigmoid(pos)
+            pos_loss = torch.sum(pos)
+            
+            weight = torch.full_like(cont_matrix[0], fill_value=1/sample_len)
+            neg_idx = torch.multinomial(weight, num_samples=self.num_neg, replacement=False)
+            neg_idx = neg_idx.transpose(0, 1).unsqueeze(0)
+            neg_idx = neg_idx.expand(2, -1, -1)
+            neg = cont_matrix.gather(-1, neg_idx)
+            neg = F.logsigmoid(-1*neg)
+            neg_loss = torch.sum(neg)
+            
+            total_loss += pos_loss + self.num_neg*neg_loss
+        
+        return total_loss
+        
+
+if __name__ == "__main__":
+    x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
+    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=False)
+    context = Context(9, [(3, 1) for _ in range(9)],)
+    # context = Context(12, [(i, 1) for i in range(2, 14)], w2v_large=True)
+
+    w2v = Wav2VecFeatureExtractor(enc, context)
+    feat_enc, feat_context = w2v(x)
+
+    loss_fn = Wav2VecLoss(4, 10)
+    loss = loss_fn(feat_enc, feat_context)
+    print(loss)
