@@ -54,7 +54,7 @@ class Encoder(nn.Module):
         return x
     
     
-class Context(nn.Module):
+class ContextNetwork(nn.Module):
     
     def __init__(self, num_layers:int, params=None, w2v_large:bool=False,):
         super().__init__()
@@ -97,7 +97,7 @@ class Wav2VecLoss(nn.Module):
         self.num_neg = num_neg
         self.linear = nn.Linear(512, 512, bias=True)
         
-    def forward(self, feat_enc:Encoder, feat_context:Context) -> torch.tensor:
+    def forward(self, feat_enc:Encoder, feat_context:ContextNetwork) -> torch.tensor:
         feat_context = torch.transpose(feat_context, 2, 1)
         feat_context = self.linear(feat_context)
         feat_context = torch.transpose(feat_context, 2, 1)
@@ -126,14 +126,14 @@ class Wav2VecLoss(nn.Module):
             
             total_loss += pos_loss + self.num_neg*neg_loss
         
-        return total_loss
+        return pos_loss, neg_loss, total_loss
         
 
 if __name__ == "__main__":
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
     enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=False)
-    context = Context(9, [(3, 1) for _ in range(9)],)
-    # context = Context(12, [(i, 1) for i in range(2, 14)], w2v_large=True)
+    context = ContextNetwork(9, [(3, 1) for _ in range(9)],)
+    # context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], w2v_large=True)
 
     w2v = Wav2VecFeatureExtractor(enc, context)
     feat_enc, feat_context = w2v(x)
