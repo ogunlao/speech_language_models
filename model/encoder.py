@@ -95,38 +95,57 @@ class Wav2VecLoss(nn.Module):
         super().__init__()
         self.k_steps = k_steps
         self.num_neg = num_neg
-        self.linear = nn.Linear(512, 512, bias=True)
         
-    def forward(self, feat_enc:Encoder, feat_context:ContextNetwork) -> torch.tensor:
-        feat_context = torch.transpose(feat_context, 2, 1)
-        feat_context = self.linear(feat_context)
-        feat_context = torch.transpose(feat_context, 2, 1)
+        # step specific affine transformations
+        self.proj_steps = nn.ModuleList(nn.Linear(512, 512, bias=True) \
+            for i in range(self.k_steps))
         
+    def forward(self, feat_enc:Encoder, feat_context:ContextNetwork) -> tuple:
+
         loss = self.compute_contrastive_loss(feat_enc, feat_context,)
         return loss
         
     def compute_contrastive_loss(self, z:torch.tensor, c:torch.tensor,): 
         # num_neg is same as lambda_
         # z, c -> batch, channel, time
-        sample_len = z.size()[2]
-        total_loss = 0.0 
-        cont_matrix = z.transpose(1, 2) @ c
-        for k in range(self.k_steps):
-            pos = torch.diagonal(cont_matrix, offset=-1*k, dim1=1, dim2=2)
+            
+        bs, channel, sample_len = z.size()
+        total_pos_loss, total_neg_loss = 0.0, 0.0
+
+        for k in range(self.k_steps): # 4 projection layers
+            # predict k steps in the future
+            c_step = self.proj_steps[k](c.transpose(2, 1))
+            c_step = c_step.transpose(2, 1)
+            
+            z_k, c_k = z[:,:,k:], c_step[:,:,:sample_len-k]
+            cont_matrix = z_k.transpose(1, 2) @ c_k
+            pos = torch.diagonal(cont_matrix, dim1=1, dim2=2)
             pos = F.logsigmoid(pos)
             pos_loss = torch.sum(pos)
             
-            weight = torch.full_like(cont_matrix[0], fill_value=1/sample_len)
-            neg_idx = torch.multinomial(weight, num_samples=self.num_neg, replacement=False)
-            neg_idx = neg_idx.transpose(0, 1).unsqueeze(0)
-            neg_idx = neg_idx.expand(2, -1, -1)
-            neg = cont_matrix.gather(-1, neg_idx)
-            neg = F.logsigmoid(-1*neg)
-            neg_loss = torch.sum(neg)
+            total_pos_loss += pos_loss
             
-            total_loss += pos_loss + self.num_neg*neg_loss
+            time = c_k.size(2)
+            for t in range(time):
+                c_t = c_k[:, :, t]
+                
+                # sample detractors from z
+                p = torch.zeros((bs, time,)).fill_(1/time)
+                neg_indices = p.multinomial(num_samples=self.num_neg, replacement=False)
+                
+                # Gather negative samples
+                neg_samples = torch.gather(z, dim=2, index=neg_indices.unsqueeze(1).repeat(1, channel, 1))  # (bs, channel, num_neg)
+
+                # Compute negative loss for this time step
+                neg = torch.bmm(neg_samples.transpose(1, 2), c_t.unsqueeze(-1))  # (bs, num_neg, 1)
+
+                # neg = neg_samples.transpose(1, 2) @ c_t.T
+                neg = F.logsigmoid(-1*neg)
+                neg_loss = torch.sum(neg)
+                total_neg_loss += neg_loss
         
-        return pos_loss, neg_loss, total_loss
+        total_loss = total_pos_loss + self.num_neg*total_neg_loss
+        return -1 * total_pos_loss / bs, -1 * total_neg_loss / bs, -1 * total_loss / bs
         
 
 if __name__ == "__main__":

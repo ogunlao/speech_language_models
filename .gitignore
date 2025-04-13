@@ -8,5 +8,7 @@ wheels/
 data/
 lightning_logs/
 
+hyperparam.py
+
 # Virtual environments
 .venv
