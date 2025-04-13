@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from model.encoder import Encoder, ContextNetwork, Wav2VecLoss
+from model.hyperparam import Wav2vecHyperParam
 
 import lightning as L
 from datasets import load_dataset
@@ -60,10 +61,9 @@ train_dataset = load_dataset("Siyong/speech_timit", cache_dir="../data", split="
 dev_dataset = load_dataset("Siyong/speech_timit", cache_dir="../data", split="test")
 
 
-batch_size = 4
 def collate_fn(data):
     audios, sentences = [], []
-    min_len = 150_000 # max len of audio
+    min_len = params.max_batch_len # max len of audio
     for item in data:
         audio = torch.tensor(item["audio"]["array"])
         min_len = min(min_len, audio.shape[0])
@@ -81,21 +81,25 @@ def collate_fn(data):
     return {"audio": audios.unsqueeze(1)}
 
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, 
-                          shuffle=True, collate_fn=collate_fn, num_workers=4)
-dev_loader = DataLoader(dev_dataset, batch_size=batch_size, 
-                        shuffle=False, collate_fn=collate_fn)
+params = Wav2vecHyperParam()
+train_loader = DataLoader(train_dataset, batch_size=params.train_batch_size, 
+                          shuffle=True, collate_fn=collate_fn, num_workers=4,)
+dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size, 
+                        shuffle=False, collate_fn=collate_fn,)
 
 # model
-encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=False)
-context = ContextNetwork(9, [(3, 1) for _ in range(9)], w2v_large=False)
+encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+                    w2v_large=True if params.model_name=="w2v_large" else False)
+context = ContextNetwork(9, [(3, 1) for _ in range(9)], 
+                    w2v_large=True if params.model_name=="w2v_large" else False)
 
-w2v_model = Wav2VecFeatureExtractor(encoder, context, k_steps=12, num_neg=10)
+w2v_model = Wav2VecFeatureExtractor(encoder, context, k_steps=params.k_steps, 
+                                    num_neg=params.num_neg,)
 
 # train model
-trainer = L.Trainer(max_epochs=10, 
-                    gradient_clip_val=4,
-                    accumulate_grad_batches=16,
+trainer = L.Trainer(max_epochs=params.epochs, 
+                    gradient_clip_val=params.gradient_clip_val,
+                    accumulate_grad_batches=params.grad_accum,
                     enable_checkpointing=True,
                     )
 trainer.fit(w2v_model, train_loader, dev_loader)

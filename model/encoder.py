@@ -33,9 +33,10 @@ class Encoder(nn.Module):
         self.layer0 = ConvLayer(1, 512, *self.enc_params[0],)
         self.encoder = nn.ModuleList([ConvLayer(512, 512, *self.enc_params[i],) \
                                       for i in range(1, num_conv)])
+        
+        # Two additional linear transformation for wav2vec_large
         self.linear = None
         if w2v_large:
-            # Two additional linear transformation
             self.linear = nn.Sequential(
                 nn.Linear(512, 512),
                 nn.Linear(512, 512),
@@ -158,5 +159,5 @@ if __name__ == "__main__":
     feat_enc, feat_context = w2v(x)
 
     loss_fn = Wav2VecLoss(4, 10)
-    loss = loss_fn(feat_enc, feat_context)
-    print(loss)
+    pos_loss, neg_loss, total_loss = loss_fn(feat_enc, feat_context)
+    print(total_loss)
