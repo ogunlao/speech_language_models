@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from model.encoder import Encoder, ContextNetwork, Wav2VecLoss
 from model.hyperparam import Wav2vecHyperParam
@@ -11,11 +11,12 @@ from datasets import load_dataset
 
 class Wav2VecFeatureExtractor(L.LightningModule):
     def __init__(self, encoder: Encoder, context: ContextNetwork, 
-                 k_steps: int, num_neg: int,):
+                 params: Wav2vecHyperParam,):
         super().__init__()
         self.encoder = encoder
         self.context = context
-        self.loss_fn = Wav2VecLoss(k_steps, num_neg)
+        self.params = params
+        self.loss_fn = Wav2VecLoss(params.k_steps, params.num_neg)
 
     def forward(self, x):
         z = self.encoder(x)
@@ -43,14 +44,24 @@ class Wav2VecFeatureExtractor(L.LightningModule):
                         "val_loss": total_loss,})
 
     def configure_optimizers(self):
+        # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936
         
         optimizer = torch.optim.Adam(self.parameters(), 
-                                lr=1e-6,)
-        
+                                        lr=self.params.lr,)
+        train_scheduler = CosineAnnealingLR(optimizer, self.params.epochs)
+        warmup_scheduler = LambdaLR(optimizer, 
+                            lr_lambda=lambda current_step: 1 / (
+                                10 ** (float(self.params.warmup_epochs - current_step))
+                                )
+                            )
+
+        scheduler = SequentialLR(optimizer, [warmup_scheduler, train_scheduler], 
+                                 [self.params.warmup_epochs])
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": ReduceLROnPlateau(optimizer),
+                "scheduler": scheduler,
                 "monitor": "train_loss",
             },
         }
@@ -81,9 +92,12 @@ def collate_fn(data):
     return {"audio": audios.unsqueeze(1)}
 
 
+# collect default parameters
 params = Wav2vecHyperParam()
+
+# create dataloaders
 train_loader = DataLoader(train_dataset, batch_size=params.train_batch_size, 
-                          shuffle=True, collate_fn=collate_fn, num_workers=4,)
+                          shuffle=True, collate_fn=collate_fn, num_workers=params.num_workers,)
 dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size, 
                         shuffle=False, collate_fn=collate_fn,)
 
@@ -93,8 +107,7 @@ encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)],
 context = ContextNetwork(9, [(3, 1) for _ in range(9)], 
                     w2v_large=True if params.model_name=="w2v_large" else False)
 
-w2v_model = Wav2VecFeatureExtractor(encoder, context, k_steps=params.k_steps, 
-                                    num_neg=params.num_neg,)
+w2v_model = Wav2VecFeatureExtractor(encoder, context, params=params)
 
 # train model
 trainer = L.Trainer(max_epochs=params.epochs, 
