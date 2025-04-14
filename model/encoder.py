@@ -12,7 +12,7 @@ class ConvLayer(nn.Module):
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, 
                               kernel_size=kernel_size, stride=stride, 
                               padding=padding, groups=1, bias=True,)
-        
+        self.dropout = nn.Dropout(p=0.05)
         self.norm = nn.GroupNorm(num_groups=1, num_channels=out_channels,)
         self.act = nn.ReLU()
         
@@ -77,19 +77,6 @@ class ContextNetwork(nn.Module):
         
         return z
     
-    
-class Wav2VecFeatureExtractor(nn.Module):
-    def __init__(self, encoder, context,):
-        super().__init__()
-        self.encoder = encoder
-        self.context = context
-        
-    def forward(self, x):
-        z = self.encoder(x)
-        c = self.context(z)
-        
-        return z, c
-    
 
 class Wav2VecLoss(nn.Module):
     def __init__(self, k_steps:int, num_neg:int):
@@ -106,7 +93,16 @@ class Wav2VecLoss(nn.Module):
         loss = self.compute_contrastive_loss(feat_enc, feat_context,)
         return loss
         
-    def compute_contrastive_loss(self, z:torch.tensor, c:torch.tensor,): 
+    def compute_contrastive_loss(self, z:torch.tensor, c:torch.tensor,):
+        """Futute time step prediction loss with negative contrastive loss
+
+        Args:
+            z (torch.tensor): _description_
+            c (torch.tensor): _description_
+
+        Returns:
+            _type_: _description_
+        """
         # num_neg is same as lambda_
         # z, c -> batch, channel, time
             
@@ -146,18 +142,5 @@ class Wav2VecLoss(nn.Module):
                 total_neg_loss += neg_loss
         
         total_loss = total_pos_loss + self.num_neg*total_neg_loss
-        return -1 * total_pos_loss / bs, -1 * total_neg_loss / bs, -1 * total_loss / bs
+        return -1 * total_pos_loss, -1 * total_neg_loss, -1 * total_loss
         
-
-if __name__ == "__main__":
-    x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=False)
-    context = ContextNetwork(9, [(3, 1) for _ in range(9)],)
-    # context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], w2v_large=True)
-
-    w2v = Wav2VecFeatureExtractor(enc, context)
-    feat_enc, feat_context = w2v(x)
-
-    loss_fn = Wav2VecLoss(4, 10)
-    pos_loss, neg_loss, total_loss = loss_fn(feat_enc, feat_context)
-    print(total_loss)
