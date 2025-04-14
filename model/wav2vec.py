@@ -15,7 +15,7 @@ class Wav2VecFeatureExtractor(L.LightningModule):
         self.encoder = encoder
         self.context = context
         self.params = params
-        self.loss_fn = Wav2VecLoss(params.k_steps, params.num_neg)
+        self.loss_fn = Wav2VecLoss(params.k_steps, params.num_neg, params.feat_dim)
 
     def forward(self, x):
         z = self.encoder(x)
@@ -70,9 +70,11 @@ if __name__ == "__main__":
     params = Wav2vecHyperParam()
     
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=False)
-    context = ContextNetwork(9, [(3, 1) for _ in range(9)],)
-    # context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], w2v_large=True)
+    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+                  dropout_prob=params.dropout_prob, w2v_large=False)
+    context = ContextNetwork(9, [(3, 1) for _ in range(9)], dropout_prob=params.dropout_prob)
+    # context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], 
+    #                           dropout_prob=params.dropout_prob, w2v_large=True)
     
 
     w2v = Wav2VecFeatureExtractor(enc, context, params)

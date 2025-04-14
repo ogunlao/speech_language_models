@@ -7,12 +7,13 @@ import torch.nn.functional as F
 torch.manual_seed(0)
 
 class ConvLayer(nn.Module):
-    def __init__(self, in_channels:int, out_channels:int, kernel_size:int, stride:int, padding:str="valid"):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, 
+                 stride: int, padding: str = "valid", dropout_prob: float = 0.0,):
         super().__init__()
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, 
                               kernel_size=kernel_size, stride=stride, 
                               padding=padding, groups=1, bias=True,)
-        self.dropout = nn.Dropout(p=0.05)
+        self.dropout = nn.Dropout(p=dropout_prob)
         self.norm = nn.GroupNorm(num_groups=1, num_channels=out_channels,)
         self.act = nn.ReLU()
         
@@ -26,11 +27,12 @@ class ConvLayer(nn.Module):
 
 class Encoder(nn.Module):
     # 5 layer convolutional network
-    def __init__(self, num_conv:int, params, w2v_large=False,):
+    def __init__(self, num_conv:int, enc_params: list, 
+                 dropout_prob: float, w2v_large=False,):
         super().__init__()
         self.num_conv = num_conv
-        self.enc_params = params
-        self.layer0 = ConvLayer(1, 512, *self.enc_params[0],)
+        self.enc_params = enc_params
+        self.layer0 = ConvLayer(1, 512, *self.enc_params[0], dropout_prob=dropout_prob)
         self.encoder = nn.ModuleList([ConvLayer(512, 512, *self.enc_params[i],) \
                                       for i in range(1, num_conv)])
         
@@ -39,6 +41,7 @@ class Encoder(nn.Module):
         if w2v_large:
             self.linear = nn.Sequential(
                 nn.Linear(512, 512),
+                nn.Dropout(p=dropout_prob),
                 nn.Linear(512, 512),
             )  
         
@@ -57,12 +60,14 @@ class Encoder(nn.Module):
     
 class ContextNetwork(nn.Module):
     
-    def __init__(self, num_layers:int, params=None, w2v_large:bool=False,):
+    def __init__(self, num_layers:int, c_params=None, 
+                 dropout_prob: float = 0.0, w2v_large:bool=False,):
         super().__init__()
         self.num_layers = num_layers
-        assert len(params) == self.num_layers
-        self.c_params = params
-        self.c_layers = nn.ModuleList([ConvLayer(512, 512, *self.c_params[i], padding="same") \
+        assert len(c_params) == self.num_layers
+        self.c_params = c_params
+        self.c_layers = nn.ModuleList([ConvLayer(512, 512, *self.c_params[i], 
+                                                 padding="same", dropout_prob=dropout_prob) \
                                       for i in range(self.num_layers)])
         self.w2v_large = w2v_large
     
@@ -79,13 +84,14 @@ class ContextNetwork(nn.Module):
     
 
 class Wav2VecLoss(nn.Module):
-    def __init__(self, k_steps:int, num_neg:int):
+    def __init__(self, k_steps:int, num_neg:int, feat_dim: int,):
         super().__init__()
         self.k_steps = k_steps
         self.num_neg = num_neg
+        self.feat_dim = feat_dim
         
         # step specific affine transformations
-        self.proj_steps = nn.ModuleList(nn.Linear(512, 512, bias=True) \
+        self.proj_steps = nn.ModuleList(nn.Linear(self.feat_dim, self.feat_dim, bias=True) \
             for i in range(self.k_steps))
         
     def forward(self, feat_enc:Encoder, feat_context:ContextNetwork) -> tuple:
