@@ -57,6 +57,7 @@ context = ContextNetwork(9, [(3, 1) for _ in range(9)],
 vq = VQ(codebook_size=params.codebook_size,
         codebook_dim=params.feat_dim,
         num_groups=params.num_groups,
+        share_codebook_variables=params.share_codebook_variables,
         params=params,)
 # vq = VectorQuantize(
 #     dim = params.feat_dim,

@@ -7,21 +7,27 @@ from .hyperparam import VQ_Wav2vecHyperParam
 class VQ(nn.Module):
     """A vector quantization codebook class for VQ-VAE"""
     def __init__(self, codebook_size: int, codebook_dim: int,
-                 num_groups: int, 
+                 num_groups: int,
+                 share_codebook_variables: bool,
                  params: VQ_Wav2vecHyperParam):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.num_groups = num_groups
+        self.share_codebook_variables = share_codebook_variables
         if self.num_groups == 1:
             self.codebook = nn.Embedding(num_embeddings=self.codebook_size, 
                                         embedding_dim=self.codebook_dim)
         elif self.num_groups > 1:
             assert self.codebook_dim % self.num_groups == 0.
-            self.codebooks = nn.ModuleList(
-                nn.Embedding(num_embeddings=self.codebook_size, 
-                        embedding_dim=self.codebook_dim//self.num_groups) for _ in range(self.num_groups)
-            )
+            if self.share_codebook_variables:
+                self.codebook = nn.Embedding(num_embeddings=self.codebook_size, 
+                                        embedding_dim=self.codebook_dim // self.num_groups)
+            else:
+                self.codebooks = nn.ModuleList(
+                    nn.Embedding(num_embeddings=self.codebook_size, 
+                            embedding_dim=self.codebook_dim // self.num_groups) for _ in range(self.num_groups)
+                )
         
         self.use_gumbel = params.use_gumbel
         if self.use_gumbel:
@@ -51,7 +57,10 @@ class VQ(nn.Module):
                 group_logits = F.softmax(group_logits, dim=2)
                 group_indexes = torch.argmax(group_logits, dim=2)
                 
-                group_quantized = self.codebooks[group](group_indexes) # batch, time, channels
+                if self.share_codebook_variables:
+                    group_quantized = self.codebook(group_indexes) # batch, time, channels
+                else:
+                    group_quantized = self.codebooks[group](group_indexes) # batch, time, channels
                 quantized.append(group_quantized)
                 indexes.append(group_indexes)
             quantized = torch.concat(quantized, dim=2)
@@ -81,8 +90,12 @@ class VQ(nn.Module):
             batch, channels, time = x.size()
             x = x.view(batch, self.codebook_dim//self.num_groups, self.num_groups, time)
             quantized, indexes = [], []
-            for group, codebook in enumerate(self.codebooks):
-                x_group = x[:, :, group, :].squeeze(2) 
+            for group in range(self.num_groups):
+                x_group = x[:, :, group, :].squeeze(2)
+                if self.share_codebook_variables:
+                    codebook = self.codebook
+                else:
+                    codebook = self.codebooks[group]
                 
                 # find nearest cluster for each
                 group_indexes = self.find_closest_emb(x_group, codebook.weight)

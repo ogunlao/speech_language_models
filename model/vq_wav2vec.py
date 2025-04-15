@@ -45,18 +45,17 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
         return z, q_outputs, c
     
     def compute_gumbel_annealing_weight(self):
-        start = self.params.annealing_weight_start 
         end = self.params.annealing_weight_end
+        if not self.training: return end
+        
+        start = self.params.annealing_weight_start 
         anneal_time = self.params.anneal_time
         curr_epoch = self.current_epoch
         
         # annealed for some training epochs and then kept constant for the remainder
-        if not self.training or (curr_epoch > anneal_time*self.trainer.max_epochs):
-            return end
-        
         annealing_weight = start + (start - end) * curr_epoch/(
                                         -anneal_time*self.trainer.max_epochs)
-        return annealing_weight
+        return max(annealing_weight, end)
     
     
     def training_step(self, batch, batch_idx):
@@ -178,6 +177,7 @@ if __name__ == "__main__":
     vq = VQ(codebook_size=params.codebook_size,
             codebook_dim=params.feat_dim,
             num_groups=params.num_groups,
+            share_codebook_variables=params.share_codebook_variables,
             params=params,)
 
     vq_w2v_model = VQ_Wav2VecFeatureExtractor(encoder, context, vq, params=params)
