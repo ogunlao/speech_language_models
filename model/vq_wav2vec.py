@@ -3,17 +3,17 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
-from .encoder import Encoder, ContextNetwork, Wav2VecLoss
-from .hyperparam import VQ_Wav2vecHyperParam
-from .quantizer import VQ
-from vector_quantize_pytorch import VectorQuantize
+from .modules.encoder import Encoder, ContextNetwork
+from .modules.quantizer import VQ
+from .utils.config import VQ_Wav2vecHyperParam
+from .utils.loss import Wav2VecLoss
 
 import lightning as L
 
 
 class VQ_Wav2VecFeatureExtractor(L.LightningModule):
     def __init__(self, encoder: Encoder, context: ContextNetwork, 
-                 quantizer: VectorQuantize, params: VQ_Wav2vecHyperParam,):
+                 quantizer: VQ, params: VQ_Wav2vecHyperParam,):
         super().__init__()
         self.automatic_optimization = False
         self.encoder = encoder
@@ -24,14 +24,7 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
         self.commitment_weight = params.commitment_weight
         if self.params.use_gumbel:
             self.automatic_optimization = True
-            
-    # def setup(self, stage):
-    #     if stage == 'fit':
-    #         n_gpus = self.hparams.get("n_gpus", 1)
-    #         n_nodes = self.hparams.get("n_nodes", 1)
-    #         total_devices = n_gpus * n_nodes
-    #         train_batches = len(self.trainer.train_dataloader) // total_devices
-    #         self.train_steps = (self.hparams.epochs * train_batches) // self.hparams.accumulate_grad_batches
+
 
     def forward(self, x):
         z = self.encoder(x)
@@ -178,6 +171,7 @@ if __name__ == "__main__":
             codebook_dim=params.feat_dim,
             num_groups=params.num_groups,
             share_codebook_variables=params.share_codebook_variables,
+            use_gumbel=params.use_gumbel,
             params=params,)
 
     vq_w2v_model = VQ_Wav2VecFeatureExtractor(encoder, context, vq, params=params)

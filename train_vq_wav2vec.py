@@ -2,11 +2,11 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
-from model.encoder import Encoder, ContextNetwork, Wav2VecLoss
-from model.hyperparam import VQ_Wav2vecHyperParam
+from model.modules.encoder import Encoder, ContextNetwork
+from model.utils.config import VQ_Wav2vecHyperParam
+from model.utils.loss import Wav2VecLoss
 from model.vq_wav2vec import VQ_Wav2VecFeatureExtractor
-from model.quantizer import VQ
-from vector_quantize_pytorch import VectorQuantize
+from model.modules.quantizer import VQ
 
 import lightning as L
 from datasets import load_dataset
@@ -52,20 +52,15 @@ encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)],
                     w2v_large=True if params.model_name=="w2v_large" else False)
 context = ContextNetwork(9, [(3, 1) for _ in range(9)], 
                          dropout_prob=params.dropout_prob,
-                    w2v_large=True if params.model_name=="w2v_large" else False)
+                            w2v_large=True if params.model_name=="w2v_large" else False)
 
 vq = VQ(codebook_size=params.codebook_size,
         codebook_dim=params.feat_dim,
         num_groups=params.num_groups,
         share_codebook_variables=params.share_codebook_variables,
+        use_gumbel=params.use_gumbel,
         params=params,)
-# vq = VectorQuantize(
-#     dim = params.feat_dim,
-#     codebook_size = params.codebook_size,     # codebook size
-#     ema_update = False,             # the exponential moving average decay, lower means the dictionary will change faster
-#     commitment_weight = params.commitment_weight,   # the weight on the commitment loss
-#     learnable_codebook=True,
-# )
+
 vq_w2v_model = VQ_Wav2VecFeatureExtractor(encoder, context, vq, params=params)
 
 # train model

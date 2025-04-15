@@ -1,6 +1,6 @@
 import torch
 
-from model.encoder import Encoder, ContextNetwork, Wav2VecFeatureExtractor
+from implement.wav2vec.model.modules.encoder import Encoder, ContextNetwork, Wav2VecFeatureExtractor
 
 x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
 enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], w2v_large=True)

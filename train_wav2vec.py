@@ -2,9 +2,10 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
-from model.encoder import Encoder, ContextNetwork, Wav2VecLoss
-from model.hyperparam import Wav2vecHyperParam
+from model.modules.encoder import Encoder, ContextNetwork
 from model.wav2vec import Wav2VecFeatureExtractor
+from model.utils.config import Wav2vecHyperParam
+from model.utils.loss import Wav2VecLoss
 
 import lightning as L
 from datasets import load_dataset
@@ -46,9 +47,11 @@ dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size,
 
 # model
 encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+                  dropout_prob=params.dropout_prob,
                     w2v_large=True if params.model_name=="w2v_large" else False)
 context = ContextNetwork(9, [(3, 1) for _ in range(9)], 
-                    w2v_large=True if params.model_name=="w2v_large" else False)
+                         dropout_prob=params.dropout_prob,
+                            w2v_large=True if params.model_name=="w2v_large" else False)
 
 w2v_model = Wav2VecFeatureExtractor(encoder, context, params=params)
 

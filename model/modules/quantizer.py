@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .hyperparam import VQ_Wav2vecHyperParam
+from ..utils.config import VQ_Wav2vecHyperParam
 
 
 class VQ(nn.Module):
@@ -9,15 +9,18 @@ class VQ(nn.Module):
     def __init__(self, codebook_size: int, codebook_dim: int,
                  num_groups: int,
                  share_codebook_variables: bool,
+                 use_gumbel: bool,
                  params: VQ_Wav2vecHyperParam):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.num_groups = num_groups
         self.share_codebook_variables = share_codebook_variables
+        self.use_gumbel = use_gumbel
         if self.num_groups == 1:
             self.codebook = nn.Embedding(num_embeddings=self.codebook_size, 
                                         embedding_dim=self.codebook_dim)
+        # create multiple groups of codebook
         elif self.num_groups > 1:
             assert self.codebook_dim % self.num_groups == 0.
             if self.share_codebook_variables:
@@ -29,7 +32,6 @@ class VQ(nn.Module):
                             embedding_dim=self.codebook_dim // self.num_groups) for _ in range(self.num_groups)
                 )
         
-        self.use_gumbel = params.use_gumbel
         if self.use_gumbel:
             self.gumbel_proj = nn.Sequential(
                 nn.Linear(params.feat_dim, params.feat_dim, bias=False,),
@@ -125,7 +127,4 @@ class VQ(nn.Module):
             quantized, indexes = self.kmeans_estimator(x,)
 
         return quantized, indexes
-            
-        
-    
         

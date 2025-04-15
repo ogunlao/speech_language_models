@@ -2,8 +2,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
-from .encoder import Encoder, ContextNetwork, Wav2VecLoss
-from .hyperparam import Wav2vecHyperParam
+from .modules.encoder import Encoder, ContextNetwork
+from .utils.config import Wav2vecHyperParam
+from .utils.loss import Wav2VecLoss
 
 import lightning as L
 
