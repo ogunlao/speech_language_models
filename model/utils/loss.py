@@ -4,8 +4,18 @@ import torch.nn.functional as F
 
 from ..modules.encoder import Encoder, ContextNetwork
 
+class VQVaeLoss(nn.Module):
+    def __init__(self,):
+        super().__init__()
+        self.loss = nn.CrossEntropyLoss()
+        
+    def forward(self, output, target):
+        return self.loss(output.view(-1, 256),
+                target.long().view(-1))
+        
+        
 class Wav2VecLoss(nn.Module):
-    def __init__(self, k_steps:int, num_neg:int, feat_dim: int,):
+    def __init__(self, k_steps: int, num_neg: int, feat_dim: int,):
         super().__init__()
         self.k_steps = k_steps
         self.num_neg = num_neg
@@ -20,7 +30,7 @@ class Wav2VecLoss(nn.Module):
         loss = self.compute_contrastive_loss(feat_enc, feat_context,)
         return loss
         
-    def compute_contrastive_loss(self, z:torch.tensor, c:torch.tensor,):
+    def compute_contrastive_loss(self, z: torch.tensor, c: torch.tensor,):
         """Futute time step prediction loss with negative contrastive loss
 
         Args:

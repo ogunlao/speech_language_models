@@ -1,5 +1,4 @@
 import torch
-from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from .modules.encoder import Encoder, ContextNetwork
@@ -71,10 +70,10 @@ if __name__ == "__main__":
     params = Wav2vecHyperParam()
     
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+    enc = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
                   dropout_prob=params.dropout_prob, w2v_large=False)
-    context = ContextNetwork(9, [(3, 1) for _ in range(9)], dropout_prob=params.dropout_prob)
-    # context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], 
+    context = ContextNetwork(9, 512, [(3, 1) for _ in range(9)], dropout_prob=params.dropout_prob)
+    # context = ContextNetwork(12, 512, [(i, 1) for i in range(2, 14)], 
     #                           dropout_prob=params.dropout_prob, w2v_large=True)
     
 

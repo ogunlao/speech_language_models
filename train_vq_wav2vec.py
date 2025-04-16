@@ -4,7 +4,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from model.modules.encoder import Encoder, ContextNetwork
 from model.utils.config import VQ_Wav2vecHyperParam
-from model.utils.loss import Wav2VecLoss
 from model.vq_wav2vec import VQ_Wav2VecFeatureExtractor
 from model.modules.quantizer import VQ
 
@@ -47,10 +46,10 @@ dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size,
                         shuffle=False, collate_fn=collate_fn,)
 
 # model
-encoder = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)],
+encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)],
                   dropout_prob=params.dropout_prob,
                     w2v_large=True if params.model_name=="w2v_large" else False)
-context = ContextNetwork(9, [(3, 1) for _ in range(9)], 
+context = ContextNetwork(9, 512, [(3, 1) for _ in range(9)], 
                          dropout_prob=params.dropout_prob,
                             w2v_large=True if params.model_name=="w2v_large" else False)
 

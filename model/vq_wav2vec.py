@@ -1,6 +1,6 @@
 import copy
 import torch
-from torch.utils.data import DataLoader
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from .modules.encoder import Encoder, ContextNetwork
@@ -28,11 +28,13 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
 
     def forward(self, x):
         z = self.encoder(x)
-        
-        curr_annealing_weight = self.compute_gumbel_annealing_weight()
-        q_outputs = self.quantizer(z, curr_annealing_weight)
+        if self.params.use_gumbel:
+            curr_annealing_weight = self.compute_gumbel_annealing_weight()
+            q_outputs = self.quantizer(z, curr_annealing_weight)
+        else:
+            q_outputs = self.quantizer(z)
+            
         z_hat, indices = q_outputs
-        commit_loss = 0.0
         c = self.context(z_hat)
         
         return z, q_outputs, c
@@ -50,23 +52,23 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
                                         -anneal_time*self.trainer.max_epochs)
         return max(annealing_weight, end)
     
-    
     def training_step(self, batch, batch_idx):
-        if not self.automatic_optimization:
+        if not self.params.use_gumbel:
             return self.train_kmeans(batch, batch_idx)
         
         x = batch["audio"]
         z, q_outputs, c = self.forward(x)
-        commit_loss = 0.0
         z_hat, indices = q_outputs
         
-        l2_loss = torch.sum((z.detach() - z_hat)**2)
-        commit_loss = torch.sum((z - z_hat.detach())**2)
+        # compute auxilliary losses
+        l2_loss = F.mse_loss(z.detach(), z_hat)
+        commit_loss = F.mse_loss(z, z_hat.detach())
+        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
         
         # compute wav2vec loss
         pos_loss, neg_loss, w2v_loss = self.w2v_loss_fn(z, c)
         
-        total_loss = w2v_loss + l2_loss +  commit_loss
+        total_loss = w2v_loss + auxilliary_loss
         
         self.log_dict({"train_loss": total_loss, "l2_loss": l2_loss, 
                        "commit_loss": commit_loss, "w2v_loss": w2v_loss, }, prog_bar=True)
@@ -117,20 +119,52 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
         self.log_dict({"train_loss": total_loss, "l2_loss": l2_loss, 
                        "commit_loss": commit_loss, "w2v_loss": w2v_loss, }, prog_bar=True)
 
+    def validate_kmeans(self, batch: torch.tensor, batch_idx):
+        """Use k means to determine corresponding code to encoder output, and \
+            copy gradient from decoder output to encoder input. 
+
+        Args:
+            batch (torch.tensor): A single training batch of bs x frames
+            batch_idx (torch.tensor): batch index
+        """
+        x = batch["audio"]
+        
+        z = self.encoder(x)
+        z_hat, indices = self.quantizer(z)
+        decoder_input = z_hat.clone().detach().requires_grad_(True)
+        c = self.context(decoder_input)
+        
+        # compute wav2vec loss
+        pos_loss, neg_loss, w2v_loss = self.w2v_loss_fn(z, c)
+        
+        l2_loss = F.mse_loss(z.detach(), z_hat)
+        commit_loss = F.mse_loss(z, z_hat.detach())
+        
+        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
+        
+        val_total_loss = w2v_loss + auxilliary_loss
+        
+        self.log_dict({"val_loss": val_total_loss, "val_commit_loss": commit_loss,
+                        "val_w2v_loss": w2v_loss, "val_l2_loss": l2_loss}, prog_bar=True)
+
     def validation_step(self, batch, batch_idx):
+        if not self.params.use_gumbel:
+            return self.validate_kmeans(batch, batch_idx)
+        
         x = batch["audio"]
         z, q_outputs, c = self.forward(x)
 
         z_hat, indices = q_outputs
         
         # compute l2 loss and commitment loss
-        l2_loss = torch.sum((z.detach() - z_hat)**2)
-        commit_loss = torch.sum((z - z_hat.detach())**2)
+        l2_loss = F.mse_loss(z.detach(), z_hat)
+        commit_loss = F.mse_loss(z, z_hat.detach())
+        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
         
         # compute wav2vec loss
         pos_loss, neg_loss, w2v_loss = self.w2v_loss_fn(z, c)
         
-        val_total_loss = w2v_loss + l2_loss + commit_loss
+        val_total_loss = w2v_loss + auxilliary_loss
         
         self.log_dict({"val_loss": val_total_loss, "val_commit_loss": commit_loss,
                         "val_w2v_loss": w2v_loss, "val_l2_loss": l2_loss}, prog_bar=True)
@@ -162,9 +196,9 @@ class VQ_Wav2VecFeatureExtractor(L.LightningModule):
 if __name__ == "__main__":
     params = VQ_Wav2vecHyperParam()
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-    enc = Encoder(5, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+    encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
                   dropout_prob=params.dropout_prob, w2v_large=True)
-    context = ContextNetwork(12, [(i, 1) for i in range(2, 14)], 
+    context = ContextNetwork(12, 512, [(i, 1) for i in range(2, 14)], 
                              dropout_prob=params.dropout_prob, w2v_large=True)
     
     vq = VQ(codebook_size=params.codebook_size,
@@ -179,7 +213,3 @@ if __name__ == "__main__":
     feat_enc, q_outputs, feat_context = vq_w2v_model(x)
     quantized, indices, commit_loss = q_outputs
     
-
-    
-    
-        
