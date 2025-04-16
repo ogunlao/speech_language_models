@@ -25,20 +25,16 @@ class VQ_VAE(L.LightningModule):
 
     def forward(self, x):
         z = self.encoder(x)
-        q_outputs = self.quantizer(z)
-            
-        z_hat, indices = q_outputs
-        x_hat = self.decoder(z_hat)
+        quantized, indices = self.quantizer(z)
         
-        return z, q_outputs, x_hat
+        return z, quantized, indices
     
     def training_step(self, batch, batch_idx):
         x = batch["audio"]
         x_quantized = batch["audio_quantized"]
         speaker_emb = batch["speaker_emb"]
         
-        z = self.encoder(x)
-        quantized, indices = self.quantizer(z)
+        z, quantized, indices = self.forward(x)
         
         l2_loss = F.mse_loss(z.detach(), quantized)
         commit_loss = F.mse_loss(z, quantized.detach())
@@ -68,16 +64,15 @@ class VQ_VAE(L.LightningModule):
         x_quantized = batch["audio_quantized"]
         speaker_emb = batch["speaker_emb"]
         
-        z = self.encoder(x)
-        
-        q_outputs = self.quantizer(z)
-            
-        quantized, indices = q_outputs
+        z, quantized, indices = self.forward(x)
         
         # compute l2 loss and commitment loss
         l2_loss = F.mse_loss(z.detach(), quantized)
         commit_loss = F.mse_loss(z, quantized.detach())
         auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
+        
+        # Straight Through Estimator
+        quantized = z + (quantized - z).detach()
         
         # decoder conditioned on speaker emb
         # x starts with a zero
@@ -92,7 +87,23 @@ class VQ_VAE(L.LightningModule):
         
         self.log_dict({"val_loss": val_total_loss, "val_commit_loss": commit_loss,
                         "val_vae_loss": vae_loss, "val_l2_loss": l2_loss}, prog_bar=True)
-
+    
+    def regenerate_audio(self, x, speaker_emb: torch.tensor | None):
+        # x dim (B, 1, T)
+        with torch.no_grad():
+            z, quantized, indices = self.forward(x)
+            
+            # Straight Through Estimator
+            quantized = z + (quantized - z).detach()
+            
+            # decoder conditioned on speaker emb
+            # x starts with a zero
+            zero_frame = torch.zeros((x.shape[0], 1, 1))
+            padded_x = torch.cat([zero_frame, x[:, :, :-1]], dim=2)
+            x_hat = self.decoder(padded_x, quantized, speaker_emb)
+        
+        return x_hat, quantized
+        
     def configure_optimizers(self):
         # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936
         

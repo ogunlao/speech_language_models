@@ -7,8 +7,8 @@ The implementation are for research purposes and are intended to follow the pape
 ## Models currently implemented
 
 1. [vq-vae](https://arxiv.org/abs/1711.00937)(2017): Proposed vector quantization for acoustic code discovery using gumbel softmax for straight-through estimation of latents acoustic code. Also, showed that acoustic codes are closely related to phoneme categories.
-1. [wav2vec](https://arxiv.org/abs/1904.05862): Proposed (contrastive) future time step prediction of actual tokens from negative samples
-1. [vq-wav2vec](https://arxiv.org/abs/1910.05453): Applied vector quantization to wav2vec and show promising results for speech language modelling (using masked language modelling) and ASR
+1. [wav2vec](https://arxiv.org/abs/1904.05862): Proposed (contrastive) future time step prediction of actual tokens from negative samples.
+1. [vq-wav2vec](https://arxiv.org/abs/1910.05453): Applied vector quantization to wav2vec and show promising results for speech language modelling (using masked language modelling), ASR, They also showed higher quality to compression ratio than conventional audio compression algotithms.
 
 ### Special acknowledgements
 
