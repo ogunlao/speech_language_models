@@ -1,4 +1,8 @@
-"""WaveNet model adapted from https://github.com/tabisheva/wavenet-vocoder"""
+"""WaveNet model adapted from https://github.com/tabisheva/wavenet-vocoder.
+Changes: Added speaker embedding conditioning, 
+        changed convolution and deconvoultion parameters,
+"""
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -56,14 +60,15 @@ class WaveNetBlock(nn.Module):
         self.skip_1x1 = nn.Conv1d(120, 240, kernel_size=1)
         self.res_1x1 = nn.Conv1d(120, 120, kernel_size=1)
 
-    def forward(self, x, h):
+    def forward(self, x, h, speaker_emb):
         """
         :param x: audio signal after first convolution with shape (B, 120, T)
         :param h: upsampled mel spec with shape (B, num_mels, T)
         """
+        if speaker_emb:
+            x = x + speaker_emb
         output_sigmoid = self.dil_sigmoid(x)
         output_tanh = self.dil_tanh(x)
-        
         
         mel_output_sigmoid = self.mel_1x1_sigmoid(h)
         mel_output_tanh = self.mel_1x1_tanh(h)
@@ -78,7 +83,7 @@ class WaveNetBlock(nn.Module):
 class WaveNet(nn.Module):
 
     def __init__(self, num_mels=80, kernel_size=2, residual_channels=120, skip_channels=240,
-                 dilation_depth=8, dilation_repeat=2, quantized_values=256):
+                 dilation_depth=8, dilation_repeat=2, quantized_values=256, num_speakers=None,):
         super(WaveNet, self).__init__()
         self.dilations = [2 ** i for i in range(dilation_depth)] * dilation_repeat
 
@@ -95,20 +100,29 @@ class WaveNet(nn.Module):
                                          nn.Conv1d(skip_channels, skip_channels, kernel_size=1),
                                          nn.ReLU(),
                                          nn.Conv1d(skip_channels, quantized_values, kernel_size=1))
+        
+        if num_speakers and num_speakers > 1:
+            cond_layer = torch.nn.Conv1d(num_speakers, residual_channels, 1)
+            self.cond_layer = torch.nn.utils.weight_norm(cond_layer, name="weight")
 
     def forward(self, x, h, speaker_emb, training=True):
         """
         :param x: Long tensor with audio (B, T)
-        :param h: Float tensor mel spec (B, num_channels, T),
+        :param h: Float tensor quantized vector (B, num_channels, T),
+        :param speaker_emb: Long tensor, one-hot (B, num_speakers)
         :return: Float tensor (B, T, n_quantize)
         """
         x = x.squeeze(1)
         output = self.start_conv(encode_mu_law(x).unsqueeze(1))
+        
+        if speaker_emb is not None:
+            speaker_emb = self.cond_layer(speaker_emb)
+                
         if training:
             h = self.upsampling(h)  # for inference we did it earlier
         skip_connections = []
         for block in self.blocks:
-            output, skip = block(output, h)
+            output, skip = block(output, h, speaker_emb)
             skip_connections.append(skip)
 
         output = sum(skip_connections)
