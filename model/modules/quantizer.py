@@ -15,22 +15,28 @@ class VQ(nn.Module):
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.num_groups = num_groups
+        self.embedding_dim = self.codebook_dim // self.num_groups
         self.share_codebook_variables = share_codebook_variables
         self.use_gumbel = use_gumbel
         if self.num_groups == 1:
             self.codebook = nn.Embedding(num_embeddings=self.codebook_size, 
                                         embedding_dim=self.codebook_dim)
+            self.codebook.weight.data.uniform_(-1/self.codebook_size, 1/self.codebook_size)
+            
         # create multiple groups of codebook
         elif self.num_groups > 1:
             assert self.codebook_dim % self.num_groups == 0.
             if self.share_codebook_variables:
                 self.codebook = nn.Embedding(num_embeddings=self.codebook_size, 
-                                        embedding_dim=self.codebook_dim // self.num_groups)
+                                        embedding_dim=self.embedding_dim,)
+                self.codebook.weight.data.uniform_(-1/self.codebook_size, 1/self.codebook_size)
             else:
                 self.codebooks = nn.ModuleList(
                     nn.Embedding(num_embeddings=self.codebook_size, 
-                            embedding_dim=self.codebook_dim // self.num_groups) for _ in range(self.num_groups)
+                            embedding_dim=self.embedding_dim) for _ in range(self.num_groups)
                 )
+                for codebook in self.codebooks:
+                    codebook.weight.data.uniform_(-1/self.codebook_size, 1/self.codebook_size)
         
         if self.use_gumbel:
             self.gumbel_proj = nn.Sequential(
@@ -41,14 +47,14 @@ class VQ(nn.Module):
             )
     
     def gumbel_estimator(self, x, annealing_weight):
-        bs, channel, time = x.size()
-        logits = self.gumbel_proj(x.transpose(2, 1)) # bs, time, cb_size*num_grps
+        batch, channels, time = x.size()
+        logits = self.gumbel_proj(x.transpose(2, 1)) # B, T, codebook_size*num_grps
         
         # apply the gumbel softmax
         u = torch.rand(logits.size())
         v = -1*torch.log(-1*torch.log(u))
         
-        logits = (logits + u)/annealing_weight
+        logits = (logits + v) / annealing_weight
         
         if self.num_groups > 1:
             logits = logits.reshape(-1, time, self.codebook_size, self.num_groups)
@@ -77,20 +83,27 @@ class VQ(nn.Module):
         return quantized, indexes
     
     def find_closest_emb(self, x, emb):
-        emb = emb.unsqueeze(0).unsqueeze(1)
-        x = x.permute(0, 2, 1).unsqueeze(2)
-        dist = torch.sum((emb - x)**2, dim=-1)
+        B, C, T = x.shape
+        x = x.permute(0, 2, 1).contiguous() # B T C
+        x_flat = x.view(-1, self.embedding_dim) # (BT) C
+
+        # Calculate distances
+        distances = torch.sum(x_flat**2, dim=1, keepdim=True) + \
+                    torch.sum(emb**2, dim=1) - \
+                    2 * torch.matmul(x_flat, emb.t())
+
+        # Find closest embeddings
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1) # (BT) 1
+        encoding_indices = encoding_indices.reshape(B, T)
         
-        indexes = torch.argmin(dist, dim=2)
-        
-        return indexes
+        return encoding_indices
         
     def kmeans_estimator(self, x):
-        # x: batch, channels, time
+        # x: B, C, T
         
         if self.num_groups > 1:
             batch, channels, time = x.size()
-            x = x.view(batch, self.codebook_dim//self.num_groups, self.num_groups, time)
+            x = x.view(batch, self.embedding_dim, self.num_groups, time)
             quantized, indexes = [], []
             for group in range(self.num_groups):
                 x_group = x[:, :, group, :].squeeze(2)
