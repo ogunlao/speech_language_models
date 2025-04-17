@@ -12,4 +12,5 @@ The implementation are for research purposes and are intended to follow the pape
 
 ### Special acknowledgements
 
+1. Pytorch lightning: used for multi-gpu training and inference
 1. Tabisha: His implementation of the [WavNet vocoder](https://github.com/tabisheva/wavenet-vocoder) is adapted as the VQ-VAE decoder.
