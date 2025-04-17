@@ -92,3 +92,15 @@ class VQ_Wav2vecHyperParam(Wav2vecHyperParam):
     num_neg: int = 10
     max_batch_len: int = 150_000
     
+@dataclass
+class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):
+    """Class for keeping track of training and model hyperparameters."""
+    model_name: str = 'w2v2_base'
+    contrastive_loss_temp: float = 0.1
+    
+    max_batch_len: int = 150_000
+    num_neg: int = 100
+    
+    # masking params
+    mask_span: int = 10
+    mask_prob: float = 0.065

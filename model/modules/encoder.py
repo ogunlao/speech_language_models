@@ -22,11 +22,12 @@ class ConvLayer(nn.Module):
         x = self.norm(x)
         x = self.act(x)
         
-        return x
+        return self.dropout(x)
     
 
 class Encoder(nn.Module):
-    # 5 layer convolutional network
+    """ Convolutional feature encoder used by wav2vec and vq-wav2vec networks """
+    
     def __init__(self, num_conv:int,  feat_dim: int, enc_params: list,
                  dropout_prob: float, w2v_large=False,):
         super().__init__()
@@ -83,32 +84,57 @@ class ContextNetwork(nn.Module):
                 z = layer(z)
         
         return z
+    
 
-        
-class VQVAE_ConvLayer(nn.Module):
+class Wav2Vec2ConvLayer(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int, 
                  stride: int, padding: str = "valid", dropout_prob: float = 0.0,):
         super().__init__()
-        
         self.conv = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, 
-                              kernel_size=kernel_size, stride=stride, bias=True,)
-        
-        self.conv2 = nn.Conv1d(in_channels=512, out_channels=out_channels, 
-                              kernel_size=kernel_size, stride=stride, bias=True,)
-        # self.conv = nn.Modulelist(nn.Sequential(
-        #     nn.Conv1d(in_channels=in_channels, out_channels=out_channels, 
-        #                       kernel_size=kernel_size, stride=stride, 
-        #                       padding=padding, groups=1, bias=True,),
-        #     nn.Dropout(p=dropout_prob),
-        #     nn.ReLU()
-        #     ) for i in range(5)
-        # )
-        
-        
+                              kernel_size=kernel_size, stride=stride, 
+                              padding=padding, groups=1, bias=True,)
+        self.dropout = nn.Dropout(p=dropout_prob)
+        self.norm = nn.LayerNorm(out_channels)
+        self.act = nn.GELU()
         
     def forward(self, x):
         x = self.conv(x)
-        x = self.conv2(x)
+        x = self.norm(x)
+        x = self.act(x)
+        
+        return self.dropout(x)
+
+
+class Wav2Vec2Encoder(nn.Module):
+    """ Convolutional feature encoder used in wav2vec2.0"""
+    
+    def __init__(self, num_conv:int,  feat_dim: int, enc_params: list,
+                 dropout_prob: float, w2v_large=False,):
+        super().__init__()
+        self.num_conv = num_conv
+        self.enc_params = enc_params
+        self.feat_dim = feat_dim
+        self.layer0 = Wav2Vec2ConvLayer(1, feat_dim, *self.enc_params[0], dropout_prob=dropout_prob)
+        self.encoder = nn.ModuleList([Wav2Vec2ConvLayer(self.feat_dim, self.feat_dim, *self.enc_params[i],) \
+                                      for i in range(1, num_conv)])
+        
+        # Two additional linear transformation for wav2vec_large
+        self.linear = None
+        if w2v_large:
+            self.linear = nn.Sequential(
+                nn.Linear(self.feat_dim, self.feat_dim),
+                nn.Dropout(p=dropout_prob),
+                nn.Linear(self.feat_dim, self.feat_dim),
+            )  
+        
+    def forward(self, x):
+        x = self.layer0(x)
+        for layer in self.encoder:
+            x = layer(x)
+            
+        if self.linear:
+            x = torch.transpose(x, 2, 1)
+            x = self.linear(x)
+            x = torch.transpose(x, 2, 1)
         
         return x
-    

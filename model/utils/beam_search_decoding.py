@@ -1,5 +1,6 @@
-import torch
 import heapq
+import torch
+
 
 class BeamSearchDecoder:
     def __init__(self, language_model,
@@ -7,6 +8,18 @@ class BeamSearchDecoder:
                  acoustic_weight: float = 1, lm_weight: float = 1,
                  word_len_weight: float = 1, space_weight: float = 1,
                  beam_size: int = 1,):
+        """A beam search decoder.
+
+        Args:
+            language_model (nn.Module): A language model e.g., n-gram or neural language model
+            space_index (int): Space token index the probability matrix
+            eos_index (int): End of sequence token index in the probability matrix
+            acoustic_weight (float, optional): Weight for acoustic score. Defaults to 1.
+            lm_weight (float, optional): Weight for language model score. Defaults to 1.
+            word_len_weight (float, optional): Weight for token length. Defaults to 1.
+            space_weight (float, optional): Weight for total number of empty spaces. Defaults to 1.
+            beam_size (int, optional): Beam size to consider during path traversal. Defaults to 1.
+        """
         self.lm = language_model
         self.acoustic_weight = acoustic_weight
         self.word_len_weight = word_len_weight
@@ -14,6 +27,7 @@ class BeamSearchDecoder:
         self.lm_weight = lm_weight
         self.beam_size = beam_size
         self.space_index = space_index
+        self.eos_index = eos_index
     
     def compute_lm_prob(self, prev_tokens, curr_token):
         """Computes the conditional probability of the current token given previous tokens.
@@ -49,7 +63,6 @@ class BeamSearchDecoder:
             
             # for first timestep, just add highest probs until beam size
             if t == 0 or not min_heap:
-                total_space = 0.0
                 for r in range(vocab_len):
                     heapq.heapify(min_heap)
                     heap_item = [acoustic_log_prob_t[r], [r]]
@@ -66,6 +79,17 @@ class BeamSearchDecoder:
             min_heap2 = []
             for heap_item in min_heap: 
                 score, tokens = heap_item
+                
+                # if this path has reached the end, just check that it is  
+                # better than what has been seen since we ignore what's after eos
+                if tokens[-1] == self.eos_index:
+                    if len(min_heap2) == self.beam_size:
+                        if score > min_heap2[0][0]:
+                            heapq.heapreplace(min_heap2, heap_item)
+                        continue
+                    heapq.heappush(min_heap2, new_heap_item)
+                
+                # if not, evaluate the next time step
                 for r in range(vocab_len):
                     # get lm probability
                     lang_model_prob = self.compute_lm_prob(tokens, r)
@@ -112,12 +136,14 @@ if __name__ == "__main__":
                            lm_weight=0.0,
                            word_len_weight=0.0,
                            space_weight=0.0,
-                           beam_size=3, # beam size of 1 corresponds to greedy search
+                           beam_size=1, # beam size of 1 corresponds to greedy search
                            space_index=-1,
                            eos_index=0,
                            )
     
     ans = bs(x, num_candidates=None)
+    assert torch.allclose(torch.tensor(ans[0][1]), 
+                          torch.tensor([4, 0, 4, 0, 4, 0, 4, 0, 4, 0]))
     print(ans)
                         
                     

@@ -25,7 +25,7 @@ class Wav2VecLoss(nn.Module):
         self.proj_steps = nn.ModuleList(nn.Linear(self.feat_dim, self.feat_dim, bias=True) \
             for i in range(self.k_steps))
         
-    def forward(self, feat_enc: Encoder, feat_context: ContextNetwork) -> tuple:
+    def forward(self, feat_enc: torch.tensor, feat_context: torch.tensor) -> tuple:
 
         loss = self.compute_contrastive_loss(feat_enc, feat_context,)
         return loss
@@ -80,3 +80,37 @@ class Wav2VecLoss(nn.Module):
         
         total_loss = total_pos_loss + self.num_neg*total_neg_loss
         return -1 * total_pos_loss, -1 * total_neg_loss, -1 * total_loss
+    
+class Wav2Vec2Loss(nn.Module):
+    def __init__(self, k_steps: int, num_neg: int, feat_dim: int,):
+        super().__init__()
+        self.k_steps = k_steps
+        self.num_neg = num_neg
+        self.feat_dim = feat_dim
+        
+        # step specific affine transformations
+        self.proj_steps = nn.ModuleList(nn.Linear(self.feat_dim, self.feat_dim, bias=True) \
+            for i in range(self.k_steps))
+        
+    def forward(self, feat_enc, feat_context, masked_indices) -> tuple:
+
+        loss = self.compute_contrastive_loss(feat_enc, feat_context, masked_indices)
+        return loss
+        
+    def compute_contrastive_loss(self, quantized: torch.tensor, c: torch.tensor, masked_indices):
+        """Futute time step prediction loss with negative contrastive loss
+
+        Args:
+            z (torch.tensor): _description_
+            c (torch.tensor): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        # num_neg is same as lambda_
+        # z, c -> batch, channel, time
+            
+        bs, channel, sample_len = quantized.size()
+        total_loss = 0.0
+
+        return  -1 * total_loss
