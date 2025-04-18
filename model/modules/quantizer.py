@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..utils.config import VQ_Wav2vecHyperParam
+from ..utils.config import Wav2vecHyperParam
 
 
 class VQ(nn.Module):
@@ -10,11 +10,13 @@ class VQ(nn.Module):
                  num_groups: int,
                  share_codebook_variables: bool,
                  use_gumbel: bool,
-                 params: VQ_Wav2vecHyperParam):
+                 params: Wav2vecHyperParam,
+                 diversity_weight: float = 0.0,):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.num_groups = num_groups
+        self.diversity_weight = diversity_weight
         self.embedding_dim = self.codebook_dim // self.num_groups
         self.share_codebook_variables = share_codebook_variables
         self.use_gumbel = use_gumbel
@@ -71,8 +73,6 @@ class VQ(nn.Module):
                     group_quantized = self.codebooks[group](group_indexes) # batch, time, channels
                 quantized.append(group_quantized)
                 indexes.append(group_indexes)
-            quantized = torch.concat(quantized, dim=2)
-            quantized = quantized.transpose(2, 1)
         else:
             logits = F.softmax(logits, dim=2)
             indexes = torch.argmax(logits, dim=2)
@@ -132,12 +132,42 @@ class VQ(nn.Module):
         
         return quantized, indexes
     
-    def forward(self, x: torch.tensor, annealing_weight: float=None,):
+    def forward(self, x: torch.tensor, annealing_weight: float=None, 
+                return_diversity_loss: bool=False,):
         # use straight-through estimator
         if self.use_gumbel:
             quantized, indexes = self.gumbel_estimator(x, annealing_weight)
         else:
             quantized, indexes = self.kmeans_estimator(x,)
-
-        return quantized, indexes
+            return quantized, indexes
+        # compute diversity loss for wav2vec2
+        diversity_loss = self.compute_diversity_loss(quantized, indexes)
+        
+        # combine retrieved quantized vectors from different groups
+        quantized = torch.concat(quantized, dim=2)
+        quantized = quantized.transpose(2, 1)
+        
+        if return_diversity_loss:
+            return quantized, indexes, diversity_loss
+        
+        return quantized, indexes 
+    
+    def compute_diversity_loss(self, quantized_groups, indexes):
+        # Diversity loss used in Wav2vec2.0
+        assert isinstance(quantized_groups, list)
+        
+        B, C, T = quantized_groups[0].size()
+        total_exp_g = 0.0
+        for group in range(self.num_groups):
+            quantized_g = quantized_groups[group]
+            h_q = quantized_g*torch.log(torch.clamp(quantized_g, 1e-9))
+            exp_min_sum_hq = torch.exp(-h_q.sum())
+            total_exp_g += exp_min_sum_hq
+        
+        total_q = self.num_groups * B * T
+        diversity_loss = (total_q - total_exp_g) / total_q
+        
+        return diversity_loss
+            
+        
         

@@ -78,7 +78,7 @@ class VQ_Wav2vecHyperParam(Wav2vecHyperParam):
     commitment_weight: float = 0.25
     
     # gumbel params
-    use_gumbel: bool = False # use kmeans or straight through estimator
+    use_gumbel: bool = True # use kmeans or straight through estimator
     annealing_weight_start : float = 2. # 2 to 0.5
     annealing_weight_end: float = 0.5
     anneal_time: float = 0.7 # 70% of training
@@ -98,7 +98,7 @@ class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):
     model_name: str = 'w2v2_base'
     contrastive_loss_temp: float = 0.1
     diversity_weight: float = 0.2
-    
+    use_gumbel: bool = True
     max_batch_len: int = 150_000
     num_neg: int = 100
     

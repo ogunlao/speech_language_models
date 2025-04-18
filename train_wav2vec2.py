@@ -78,6 +78,7 @@ vq = VQ(codebook_size=params.codebook_size,
         num_groups=params.num_groups,
         share_codebook_variables=params.share_codebook_variables,
         use_gumbel=params.use_gumbel,
+        diversity_weight=params.diversity_weight,
         params=params,)
 
 w2v2_model = Wav2Vec2FeatureExtractor(encoder, context, vq, params=params)

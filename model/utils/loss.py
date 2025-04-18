@@ -114,3 +114,5 @@ class Wav2Vec2Loss(nn.Module):
         total_loss = 0.0
 
         return  -1 * total_loss
+    
+        

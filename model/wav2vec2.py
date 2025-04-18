@@ -56,9 +56,9 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         z = self.encoder(x)
         
         curr_annealing_weight = self.compute_gumbel_annealing_weight()
-        q_outputs = self.quantizer(z, curr_annealing_weight)
+        q_outputs = self.quantizer(z, curr_annealing_weight, return_diversity_loss=True,)
             
-        quantized, indices = q_outputs
+        quantized, indices, diversity_loss = q_outputs
         
         # mask a portion of quantized
         masked_z, mask, masked_indices = self.mask_input(z, self.params.mask_prob, 
@@ -82,45 +82,35 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
                                         -anneal_time*self.trainer.max_epochs)
         return max(annealing_weight, end)
     
-    def compute_diversity_loss(self):
-        # TODO: implement diversity loss
-        return 0.5
-    
     def training_step(self, batch, batch_idx):
         
         x = batch["audio"]
         encoded, q_outputs, context_output, masked_indices = self.forward(x)
-        quantized, indices = q_outputs
-        
-        codebook_diversity_loss = self.compute_diversity_loss()
-        codebook_diversity_loss = self.diversity_weight*codebook_diversity_loss
+        quantized, indices, diversity_loss = q_outputs
         
         # compute wav2vec loss
         w2v2_loss = self.w2v2_loss_fn(quantized, context_output, masked_indices)
         
-        total_loss = w2v2_loss + codebook_diversity_loss
+        total_loss = w2v2_loss + self.diversity_weight * diversity_loss
         
         self.log_dict({"train_loss": total_loss,
-                       "diversity_loss": codebook_diversity_loss, "w2v2_loss": w2v2_loss, }, prog_bar=True)
+                       "diversity_loss": diversity_loss, "w2v2_loss": w2v2_loss, }, prog_bar=True)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-
+        
         x = batch["audio"]
         encoded, q_outputs, context_output, masked_indices = self.forward(x)
 
-        quantized, indices = q_outputs
-        
-        codebook_diversity_loss = self.compute_diversity_loss()
-        codebook_diversity_loss = self.diversity_weight*codebook_diversity_loss
+        quantized, indices, diversity_loss = q_outputs
         
         # compute wav2vec loss
         w2v2_loss = self.w2v2_loss_fn(quantized, context_output, masked_indices)
         
-        val_total_loss = w2v2_loss + codebook_diversity_loss
+        val_total_loss = w2v2_loss + self.diversity_weight * diversity_loss
         
-        self.log_dict({"val_loss": val_total_loss, "diversity_loss": codebook_diversity_loss,
+        self.log_dict({"val_loss": val_total_loss, "diversity_loss": diversity_loss,
                         "val_w2v2_loss": w2v2_loss,}, prog_bar=True)
 
     def configure_optimizers(self):
@@ -148,7 +138,7 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
     
     
 if __name__ == "__main__":
-    params = VQ_Wav2vecHyperParam()
+    params = Wav2vec2HyperParam()
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
     encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
                   dropout_prob=params.dropout_prob, w2v_large=True)
@@ -170,9 +160,10 @@ if __name__ == "__main__":
             num_groups=params.num_groups,
             share_codebook_variables=params.share_codebook_variables,
             use_gumbel=params.use_gumbel,
+            diversity_weight=params.diversity_weight,
             params=params,)
 
-    vq_w2v_model = VQ_Wav2VecFeatureExtractor(encoder, context, vq, params=params)
+    vq_w2v_model = Wav2Vec2FeatureExtractor(encoder, context, vq, params=params)
 
     feat_enc, q_outputs, feat_context = vq_w2v_model(x)
     quantized, indices, commit_loss = q_outputs
