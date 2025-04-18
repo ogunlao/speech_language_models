@@ -18,16 +18,16 @@ class Wav2VecFeatureExtractor(L.LightningModule):
         self.loss_fn = Wav2VecLoss(params.k_steps, params.num_neg, params.feat_dim)
 
     def forward(self, x):
-        z = self.encoder(x)
-        c = self.context(z)
-        return z, c
+        encoded = self.encoder(x)
+        context_output = self.context(encoded)
+        return encoded, context_output
     
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
         x = batch["audio"]
-        z, c = self.forward(x)
+        encoded, context_output = self.forward(x)
         
-        pos_loss, neg_loss, total_loss = self.loss_fn(z, c)
+        pos_loss, neg_loss, total_loss = self.loss_fn(encoded, context_output)
         self.log_dict({"pos_loss": pos_loss, "neg_loss": neg_loss,
                         "train_loss": total_loss,}, prog_bar=True)
 
@@ -36,9 +36,9 @@ class Wav2VecFeatureExtractor(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         # this is the validation loop
         x = batch["audio"]
-        z, c = self.forward(x)
+        encoded, context_output = self.forward(x)
         
-        pos_loss, neg_loss, total_loss = self.loss_fn(z, c)
+        pos_loss, neg_loss, total_loss = self.loss_fn(encoded, context_output)
         self.log_dict({"val_pos_loss": pos_loss, "val_neg_loss": neg_loss,
                         "val_loss": total_loss,})
 

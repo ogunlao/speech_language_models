@@ -36,9 +36,9 @@ class VQ_VAE(L.LightningModule):
         
         z, quantized, indices = self.forward(x)
         
-        l2_loss = F.mse_loss(z.detach(), quantized)
+        codebook_loss = F.mse_loss(z.detach(), quantized)
         commit_loss = F.mse_loss(z, quantized.detach())
-        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
+        auxilliary_loss = codebook_loss +  self.commitment_weight*commit_loss
         
         # Straight Through Estimator
         quantized = z + (quantized - z).detach()
@@ -56,7 +56,7 @@ class VQ_VAE(L.LightningModule):
         
         total_loss = vae_loss + auxilliary_loss
         
-        self.log_dict({"train_loss": total_loss, "l2_loss": l2_loss, 
+        self.log_dict({"train_loss": total_loss, "codebook_loss": codebook_loss, 
                        "commit_loss": commit_loss, "vae_loss": vae_loss, }, prog_bar=True)
 
     def validation_step(self, batch, batch_idx):
@@ -67,9 +67,9 @@ class VQ_VAE(L.LightningModule):
         z, quantized, indices = self.forward(x)
         
         # compute l2 loss and commitment loss
-        l2_loss = F.mse_loss(z.detach(), quantized)
+        codebook_loss = F.mse_loss(z.detach(), quantized)
         commit_loss = F.mse_loss(z, quantized.detach())
-        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
+        auxilliary_loss = codebook_loss +  self.commitment_weight*commit_loss
         
         # Straight Through Estimator
         quantized = z + (quantized - z).detach()
@@ -86,7 +86,7 @@ class VQ_VAE(L.LightningModule):
         val_total_loss = vae_loss + auxilliary_loss
         
         self.log_dict({"val_loss": val_total_loss, "val_commit_loss": commit_loss,
-                        "val_vae_loss": vae_loss, "val_l2_loss": l2_loss}, prog_bar=True)
+                        "val_vae_loss": vae_loss, "val_codebook_loss": codebook_loss}, prog_bar=True)
     
     def regenerate_audio(self, x, speaker_emb: torch.tensor | None):
         # x dim (B, 1, T)

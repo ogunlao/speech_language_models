@@ -61,16 +61,16 @@ encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)],
                   dropout_prob=params.dropout_prob,
                     w2v_large=True if params.model_name=="w2v_large" else False)
 context = Conformer(
-    dim = 512,
-    depth = 12,          # 12 blocks
-    dim_head = 64,
-    heads = 8,
-    ff_mult = 4,
-    conv_expansion_factor = 2,
-    conv_kernel_size = 31,
-    attn_dropout = 0.,
-    ff_dropout = 0.,
-    conv_dropout = 0.
+    dim = params.feat_dim,
+    depth = params.num_layers,
+    dim_head = params.dim_head,
+    heads = params.heads,
+    ff_mult = params.ff_expansion_size,
+    conv_expansion_factor = params.conv_expansion_factor,
+    conv_kernel_size = params.conv_kernel_size,
+    attn_dropout = params.attn_dropout,
+    ff_dropout = params.ff_dropout,
+    conv_dropout = params.conv_dropout,
 )
 
 vq = VQ(codebook_size=params.codebook_size,

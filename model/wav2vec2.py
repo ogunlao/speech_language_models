@@ -7,7 +7,7 @@ from .modules.encoder import Encoder
 from conformer import Conformer
 from .modules.quantizer import VQ
 from .utils.config import Wav2vec2HyperParam
-from .utils.loss import Wav2VecLoss
+from .utils.loss import Wav2Vec2Loss
 
 import lightning as L
 
@@ -16,14 +16,13 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
     def __init__(self, encoder: Encoder, context: Conformer, 
                  quantizer: VQ, params: Wav2vec2HyperParam,):
         super().__init__()
-        self.automatic_optimization = False
         self.encoder = encoder
         self.context = context
         self.quantizer = quantizer
         self.mask_embedding = torch.nn.Parameter(torch.randn(params.feat_dim))
         self.params = params
-        self.w2v_loss_fn = Wav2VecLoss(params.k_steps, params.num_neg, params.feat_dim)
-        self.commitment_weight = params.commitment_weight
+        self.w2v2_loss_fn = Wav2Vec2Loss(params.k_steps, params.num_neg, params.feat_dim)
+        self.diversity_weight = params.diversity_weight
 
     def mask_input(self, quantized, mask_prob, mask_span):
         B, C, q_len = quantized.size()
@@ -43,12 +42,6 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
                 valid_indices = time_indices[(time_indices >= 0) & (time_indices < q_len)]
                 if len(valid_indices) > 0:
                     mask[batch, valid_indices] = True
-        
-        # mask = torch.zeros((B, T)).to(torch.bool)
-        # for batch in range(B):
-        #     mask_starts = masked_index[batch]
-        #     for index in mask_starts:
-        #         mask[batch, index: mask_span+1] = True
                     
         fill_array = self.mask_embedding
         masked_quantized = quantized.clone()
@@ -89,46 +82,46 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
                                         -anneal_time*self.trainer.max_epochs)
         return max(annealing_weight, end)
     
+    def compute_diversity_loss(self):
+        # TODO: implement diversity loss
+        return 0.5
+    
     def training_step(self, batch, batch_idx):
         
         x = batch["audio"]
-        z, q_outputs, context_output, masked_indices = self.forward(x)
+        encoded, q_outputs, context_output, masked_indices = self.forward(x)
         quantized, indices = q_outputs
         
-        # compute auxilliary losses
-        # l2_loss = F.mse_loss(z.detach(), quantized)
-        commit_loss = F.mse_loss(z, quantized.detach())
-        codebook_diversity_loss = self.commitment_weight*commit_loss
+        codebook_diversity_loss = self.compute_diversity_loss()
+        codebook_diversity_loss = self.diversity_weight*codebook_diversity_loss
         
         # compute wav2vec loss
-        w2v2_loss = self.w2v_loss_fn(quantized, context_output, masked_indices)
+        w2v2_loss = self.w2v2_loss_fn(quantized, context_output, masked_indices)
         
         total_loss = w2v2_loss + codebook_diversity_loss
         
         self.log_dict({"train_loss": total_loss,
-                       "diversity_loss": codebook_diversity_loss, "w2v_loss": w2v2_loss, }, prog_bar=True)
+                       "diversity_loss": codebook_diversity_loss, "w2v2_loss": w2v2_loss, }, prog_bar=True)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
 
         x = batch["audio"]
-        z, q_outputs, context_output, masked_indices = self.forward(x)
+        encoded, q_outputs, context_output, masked_indices = self.forward(x)
 
         quantized, indices = q_outputs
         
-        # compute l2 loss and commitment loss
-        l2_loss = F.mse_loss(z.detach(), quantized)
-        commit_loss = F.mse_loss(z, quantized.detach())
-        auxilliary_loss = l2_loss +  self.commitment_weight*commit_loss
+        codebook_diversity_loss = self.compute_diversity_loss()
+        codebook_diversity_loss = self.diversity_weight*codebook_diversity_loss
         
         # compute wav2vec loss
-        pos_loss, neg_loss, w2v_loss = self.w2v_loss_fn(quantized, context_output, masked_indices)
+        w2v2_loss = self.w2v2_loss_fn(quantized, context_output, masked_indices)
         
-        val_total_loss = w2v_loss + auxilliary_loss
+        val_total_loss = w2v2_loss + codebook_diversity_loss
         
-        self.log_dict({"val_loss": val_total_loss, "val_commit_loss": commit_loss,
-                        "val_w2v_loss": w2v_loss, "val_l2_loss": l2_loss}, prog_bar=True)
+        self.log_dict({"val_loss": val_total_loss, "diversity_loss": codebook_diversity_loss,
+                        "val_w2v2_loss": w2v2_loss,}, prog_bar=True)
 
     def configure_optimizers(self):
         # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936

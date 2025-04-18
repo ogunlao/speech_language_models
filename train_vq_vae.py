@@ -11,8 +11,7 @@ from model.modules.quantizer import VQ
 
 import lightning as L
 from datasets import load_dataset
-    
-from model.utils.dataset import WavenetDataset
+
 
 # prepare dataset
 train_dataset = load_dataset("Siyong/speech_timit", cache_dir="../data", split="train")
