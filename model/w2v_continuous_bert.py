@@ -1,4 +1,3 @@
-import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,23 +5,23 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from .modules.encoder import Encoder, ContextNetwork
 from conformer import Conformer
-from .vq_wav2vec import VQ_Wav2VecFeatureExtractor
-from .modules.quantizer import VQ
-from .utils.config import VQ_Wav2vecHyperParam, VQ_w2v_DIscreteBERTHyperParam
+from .wav2vec import Wav2VecFeatureExtractor
+from .utils.config import Wav2vecHyperParam, w2v_ContinuousBERTHyperParam
 
 import lightning as L
 
 
-class VQw2vDiscreteBert(L.LightningModule):
-    def __init__(self, feat_extractor: VQ_Wav2VecFeatureExtractor,
+class w2vContinuousBert(L.LightningModule):
+    def __init__(self, feat_extractor: Wav2VecFeatureExtractor,
                  context_network: Conformer,
-                 params: VQ_w2v_DIscreteBERTHyperParam,):
+                 params: w2v_ContinuousBERTHyperParam,):
         super().__init__()
         self.feat_ext = feat_extractor
         self.context_network = context_network
         self.mask_embedding = nn.Parameter(torch.randn(params.feat_dim))
         self.params = params
         self.discrete_bert_loss_fn = nn.CrossEntropyLoss()
+        self.linear_c = nn.Linear(self.params.feat_dim, self.params.bert_feat_dim)
         self.vocab_proj = nn.Linear(self.params.feat_dim, self.params.codebook_size)
 
     def mask_input(self, quantized, mask_prob, mask_span):
@@ -37,7 +36,7 @@ class VQw2vDiscreteBert(L.LightningModule):
         # For each mask index, compute a span aaccording to normal dist
         mask_spans = torch.zeros_like(mask_start_index).fill_(mask_span).float()
         mask_spans = torch.normal(mean=mask_spans, std=mask_spans).to(torch.long)
-        mask_spans = torch.nn.functional.relu(mask_spans)
+        mask_spans = torch.nn.functional.relu(torch.round(mask_spans)).to(torch.long)
         
         # expand to mask_span
         mask = torch.zeros((B, q_len), dtype=torch.bool,)
@@ -73,52 +72,28 @@ class VQw2vDiscreteBert(L.LightningModule):
         
     def forward(self, x):
         with torch.no_grad():
-            encoded = self.feat_ext.encoder(x)
+            _, w2v_feat = self.feat_ext(x)
         
-            # using gumbel softmax to quantize encoded
-            q_outputs = self.feat_ext.quantizer(encoded, self.params.annealing_weight_end)
-            quantized, indices = q_outputs
+        # project features to BERT dimensions
+        w2v_feat_proj = self.linear_c(w2v_feat.transpose(2, 1))
+        w2v_feat_proj = w2v_feat.transpose(2, 1)
         
         # mask a portion of quantized
-        masked_q, mask = self.mask_input(quantized, self.params.mask_prob, 
+        masked_context, mask = self.mask_input(w2v_feat_proj, self.params.mask_prob, 
                                                         self.params.mask_span,)
         
-        context_output = self.context_network(masked_q.transpose(2, 1))
+        context_output = self.context_network(masked_context.transpose(2, 1))
         context_output = context_output.transpose(2, 1)
         
-        return encoded, q_outputs, context_output, mask
-    
-    def compute_masked_language_loss(self, quantized, indices, mask, context_output,):
-        
-        # compute dicretebert loss by predicting the masked index
-        # mask (B, T)
-        B, C, T = quantized.size()
-        
-        # select masked indices
-        masked_indices = indices[mask]
-        
-        # select masked context vectors
-        mask = mask.view(B, T)
-        context_output = context_output.transpose(2, 1).view(-1, C)
-        predicted = context_output[mask.view(-1), :]
-        
-        
-        # project samples to size of codebode
-        predicted_proj = self.vocab_proj(predicted)
-        
-        # compute cross entropy loss
-        loss = self.discrete_bert_loss_fn(predicted_proj, masked_indices)
-        
-        return loss
+        return w2v_feat_proj, context_output, mask
     
     def training_step(self, batch, batch_idx):
         
         x = batch["audio"]
-        encoded, q_outputs, context_output, mask = self.forward(x)
-        quantized, indices = q_outputs
+        w2v_feat_proj, context_output, mask = self.forward(x)
         
         # compute cross entropy loss
-        train_loss = self.compute_masked_language_loss(quantized, indices, 
+        train_loss = self.compute_masked_language_loss(w2v_feat_proj, indices, 
                                                        mask, context_output,)
         
         self.log_dict({"train_loss": train_loss, }, prog_bar=True)
@@ -128,14 +103,22 @@ class VQw2vDiscreteBert(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         
         x = batch["audio"]
-        encoded, q_outputs, context_output, mask = self.forward(x)
-        quantized, indices = q_outputs
+        w2v_feat_proj, context_output, mask = self.forward(x)
         
         # compute cross entropy loss
-        val_loss = self.compute_masked_language_loss(quantized, indices, 
+        val_loss = self.compute_masked_language_loss(w2v_feat_proj, indices, 
                                                        mask, context_output,)
         
         self.log_dict({"val_w2v2_loss": val_loss,}, prog_bar=True)
+        
+    def compute_masked_language_loss(self, w2v_feat_proj, indices, 
+                                                mask, context_output):
+        """Futute time step prediction loss with negative contrastive loss
+
+        Returns:
+            _type_: _description_
+        """
+        # TODO: Write loss for continuous bert
 
     def configure_optimizers(self):
         # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936
@@ -164,29 +147,22 @@ class VQw2vDiscreteBert(L.LightningModule):
 if __name__ == "__main__":
     
     # first initialise a vq-wav2vec model
-    vq_w2v_params = VQ_Wav2vecHyperParam()
+    w2v_params = Wav2vecHyperParam()
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
     vq_w2v_encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
-                  dropout_prob=vq_w2v_params.dropout_prob, w2v_large=True)
+                  dropout_prob=w2v_params.dropout_prob, w2v_large=True)
     vq_w2v_context = ContextNetwork(12, 512, [(i, 1) for i in range(2, 14)], 
-                             dropout_prob=vq_w2v_params.dropout_prob, w2v_large=True)
+                             dropout_prob=w2v_params.dropout_prob, w2v_large=True)
     
-    vq = VQ(codebook_size=vq_w2v_params.codebook_size,
-            codebook_dim=vq_w2v_params.feat_dim,
-            num_groups=vq_w2v_params.num_groups,
-            share_codebook_variables=vq_w2v_params.share_codebook_variables,
-            use_gumbel=vq_w2v_params.use_gumbel,
-            params=vq_w2v_params,)
-    
-    feat_extractor = VQ_Wav2VecFeatureExtractor(vq_w2v_encoder, vq_w2v_context, 
-                                                vq, vq_w2v_params)
+    feat_extractor = Wav2VecFeatureExtractor(vq_w2v_encoder, vq_w2v_context, 
+                                            w2v_params)
     
     # Then,use feat_extractor to setup DiscreteBert
     
-    params = VQ_w2v_DIscreteBERTHyperParam()
+    params = w2v_ContinuousBERTHyperParam()
     
     context = Conformer(
-        dim = 256,
+        dim = 768,
         depth = 12,          # 12 blocks
         dim_head = 64,
         heads = 8,
@@ -198,7 +174,7 @@ if __name__ == "__main__":
         conv_dropout = 0.
     )
 
-    vq_w2v_model = VQw2vDiscreteBert(feat_extractor, context, params=params)
+    vq_w2v_model = w2vContinuousBert(feat_extractor, context, params=params)
 
     feat_enc, q_outputs, feat_context = vq_w2v_model(x)
     quantized, indices, commit_loss = q_outputs

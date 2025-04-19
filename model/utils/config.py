@@ -93,7 +93,7 @@ class VQ_Wav2vecHyperParam(Wav2vecHyperParam):
     max_batch_len: int = 150_000
 
 @dataclass
-class VQ_w2v_DIscreteBERTHyperParam(VQ_Wav2vecHyperParam):
+class w2v_DiscreteBERTHyperParam(VQ_Wav2vecHyperParam):
     """Class for keeping track of training and model hyperparameters."""
     model_name: str = 'w2v2_base'
     # contrastive_loss_temp: float = 0.1
@@ -118,6 +118,13 @@ class VQ_w2v_DIscreteBERTHyperParam(VQ_Wav2vecHyperParam):
     attn_dropout = 0.
     ff_dropout = 0.01
     conv_dropout = 0.01
+    
+
+@dataclass
+class w2v_ContinuousBERTHyperParam(w2v_DiscreteBERTHyperParam):
+    """Class for keeping track of training and model hyperparameters."""
+    model_name: str = 'w2v2_base'
+    bert_feat_dim: int = 30 # 768 def
 
 @dataclass
 class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):

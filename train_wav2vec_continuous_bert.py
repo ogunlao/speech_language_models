@@ -3,9 +3,9 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 
 from model.modules.encoder import Encoder, ContextNetwork
-from model.vq_wav2vec import VQ_Wav2VecFeatureExtractor
-from model.vq_w2v_discrete_bert import VQw2vDiscreteBert
-from model.utils.config import VQ_Wav2vecHyperParam, VQ_w2v_DIscreteBERTHyperParam
+from model.wav2vec import Wav2VecFeatureExtractor
+from model.w2v_continuous_bert import w2vContinuousBert
+from model.utils.config import Wav2vecHyperParam, w2v_ContinuousBERTHyperParam
 
 from model.modules.quantizer import VQ
 
@@ -47,8 +47,8 @@ def collate_fn(data):
     return {"audio": audios.unsqueeze(1)}
 
 
-# collect default parameters
-params = VQ_w2v_DIscreteBERTHyperParam()
+# collect default feature extractor parameters
+params = w2v_ContinuousBERTHyperParam()
 
 # create dataloaders
 train_loader = DataLoader(train_dataset, batch_size=params.train_batch_size, 
@@ -58,26 +58,20 @@ dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size,
 
 
 # first initialise a vq-wav2vec model
-vq_w2v_params = VQ_Wav2vecHyperParam()
+w2v_params = Wav2vecHyperParam()
 x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-vq_w2v_encoder = Encoder(5, params.feat_dim, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
-                dropout_prob=vq_w2v_params.dropout_prob, w2v_large=True)
-vq_w2v_context = ContextNetwork(12, params.feat_dim, [(i, 1) for i in range(2, 14)], 
-                            dropout_prob=vq_w2v_params.dropout_prob, w2v_large=True)
+vq_w2v_encoder = Encoder(5, w2v_params.feat_dim, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+                dropout_prob=w2v_params.dropout_prob, w2v_large=True)
+vq_w2v_context = ContextNetwork(12, w2v_params.feat_dim, [(i, 1) for i in range(2, 14)], 
+                            dropout_prob=w2v_params.dropout_prob, w2v_large=True)
 
-vq = VQ(codebook_size=vq_w2v_params.codebook_size,
-        codebook_dim=vq_w2v_params.feat_dim,
-        num_groups=1,
-        share_codebook_variables=vq_w2v_params.share_codebook_variables,
-        use_gumbel=vq_w2v_params.use_gumbel,
-        params=vq_w2v_params,)
-
-feat_extractor = VQ_Wav2VecFeatureExtractor(vq_w2v_encoder, vq_w2v_context, 
-                                            vq, vq_w2v_params)
+feat_extractor = Wav2VecFeatureExtractor(vq_w2v_encoder, vq_w2v_context, w2v_params)
+# load pretrained vq-wav2vec model
+# feat_extractor = feat_extractor.load_from_pretrained("path")
 
 # model
 context = Conformer(
-    dim = params.feat_dim,
+    dim = params.bert_feat_dim,
     depth = params.num_layers,
     dim_head = params.dim_head,
     heads = params.heads,
@@ -89,7 +83,7 @@ context = Conformer(
     conv_dropout = params.conv_dropout,
 )
 
-w2v2_model = VQw2vDiscreteBert(feat_extractor, context, params=params)
+w2v2_model = w2vContinuousBert(feat_extractor, context, params=params)
 
 # train model
 trainer = L.Trainer(max_epochs=params.epochs, 
