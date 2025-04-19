@@ -91,7 +91,34 @@ class VQ_Wav2vecHyperParam(Wav2vecHyperParam):
     k_steps: int = 8
     num_neg: int = 10
     max_batch_len: int = 150_000
+
+@dataclass
+class VQ_w2v_DIscreteBERTHyperParam(VQ_Wav2vecHyperParam):
+    """Class for keeping track of training and model hyperparameters."""
+    model_name: str = 'w2v2_base'
+    # contrastive_loss_temp: float = 0.1
+    use_gumbel: bool = True
+    max_batch_len: int = 150_000
+    # num_neg: int = 10
+    num_groups: str = 1 # 2
     
+    # masking params
+    mask_span: int = 10
+    mask_prob: float = 0.05
+    
+    feat_dim = 30  # 512 standard
+    
+    # context network (conformer) params
+    num_layers = 1          # 12 blocks # 1 for testing
+    dim_head = 64
+    heads = 8
+    ff_expansion_size = 4
+    conv_expansion_factor = 2
+    conv_kernel_size = 31
+    attn_dropout = 0.
+    ff_dropout = 0.01
+    conv_dropout = 0.01
+
 @dataclass
 class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):
     """Class for keeping track of training and model hyperparameters."""

@@ -11,7 +11,7 @@ class VQ(nn.Module):
                  share_codebook_variables: bool,
                  use_gumbel: bool,
                  params: Wav2vecHyperParam,
-                 diversity_weight: float = 0.0,):
+                 diversity_weight: float | None = None,):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
@@ -61,26 +61,26 @@ class VQ(nn.Module):
         if self.num_groups > 1:
             logits = logits.reshape(-1, time, self.codebook_size, self.num_groups)
 
-            quantized, indexes = [], []
+            quantized, indices = [], []
             for group in range(self.num_groups):
                 group_logits = logits[:, :, :, group]
                 group_logits = F.softmax(group_logits, dim=2)
-                group_indexes = torch.argmax(group_logits, dim=2)
+                group_indices = torch.argmax(group_logits, dim=2)
                 
                 if self.share_codebook_variables:
-                    group_quantized = self.codebook(group_indexes) # batch, time, channels
+                    group_quantized = self.codebook(group_indices) # batch, time, channels
                 else:
-                    group_quantized = self.codebooks[group](group_indexes) # batch, time, channels
+                    group_quantized = self.codebooks[group](group_indices) # batch, time, channels
                 quantized.append(group_quantized)
-                indexes.append(group_indexes)
+                indices.append(group_indices)
         else:
             logits = F.softmax(logits, dim=2)
-            indexes = torch.argmax(logits, dim=2)
+            indices = torch.argmax(logits, dim=2)
             
-            quantized = self.codebook(indexes)
+            quantized = self.codebook(indices)
             quantized = quantized.transpose(2, 1)
         
-        return quantized, indexes
+        return quantized, indices
     
     def find_closest_emb(self, x, emb):
         B, C, T = x.shape
@@ -104,7 +104,7 @@ class VQ(nn.Module):
         if self.num_groups > 1:
             batch, channels, time = x.size()
             x = x.view(batch, self.embedding_dim, self.num_groups, time)
-            quantized, indexes = [], []
+            quantized, indices = [], []
             for group in range(self.num_groups):
                 x_group = x[:, :, group, :].squeeze(2)
                 if self.share_codebook_variables:
@@ -113,46 +113,48 @@ class VQ(nn.Module):
                     codebook = self.codebooks[group]
                 
                 # find nearest cluster for each
-                group_indexes = self.find_closest_emb(x_group, codebook.weight)
-                group_quantized = codebook(group_indexes)
+                group_indices = self.find_closest_emb(x_group, codebook.weight)
+                group_quantized = codebook(group_indices)
                 
                 quantized.append(group_quantized)
-                indexes.append(group_indexes)
+                indices.append(group_indices)
                 
             # combine retrieved quantized vectors from different groups
             quantized = torch.concat(quantized, dim=2)
             quantized = quantized.transpose(2, 1)
         else:
             # find nearest cluster for each 
-            indexes = self.find_closest_emb(x, self.codebook.weight)
+            indices = self.find_closest_emb(x, self.codebook.weight)
             
             # retrieve quantized embeddings
-            quantized = self.codebook(indexes)
+            quantized = self.codebook(indices)
             quantized = quantized.transpose(2, 1)
         
-        return quantized, indexes
+        return quantized, indices
     
     def forward(self, x: torch.tensor, annealing_weight: float=None, 
                 return_diversity_loss: bool=False,):
         # use straight-through estimator
         if self.use_gumbel:
-            quantized, indexes = self.gumbel_estimator(x, annealing_weight)
+            quantized, indices = self.gumbel_estimator(x, annealing_weight)
         else:
-            quantized, indexes = self.kmeans_estimator(x,)
-            return quantized, indexes
+            quantized, indices = self.kmeans_estimator(x,)
+            return quantized, indices
         # compute diversity loss for wav2vec2
-        diversity_loss = self.compute_diversity_loss(quantized, indexes)
+        if self.diversity_weight and return_diversity_loss:
+            diversity_loss = self.compute_diversity_loss(quantized, indices)
         
-        # combine retrieved quantized vectors from different groups
-        quantized = torch.concat(quantized, dim=2)
-        quantized = quantized.transpose(2, 1)
+        if isinstance(quantized, list):
+            # combine retrieved quantized vectors from different groups
+            quantized = torch.concat(quantized, dim=2)
+            quantized = quantized.transpose(2, 1)
         
         if return_diversity_loss:
-            return quantized, indexes, diversity_loss
+            return quantized, indices, diversity_loss
         
-        return quantized, indexes 
+        return quantized, indices 
     
-    def compute_diversity_loss(self, quantized_groups, indexes):
+    def compute_diversity_loss(self, quantized_groups, indices):
         # Diversity loss used in Wav2vec2.0
         assert isinstance(quantized_groups, list)
         

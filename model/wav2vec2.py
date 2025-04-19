@@ -53,21 +53,21 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         
         
     def forward(self, x):
-        z = self.encoder(x)
+        encoded = self.encoder(x)
         
         curr_annealing_weight = self.compute_gumbel_annealing_weight()
-        q_outputs = self.quantizer(z, curr_annealing_weight, return_diversity_loss=True,)
+        q_outputs = self.quantizer(encoded, curr_annealing_weight, return_diversity_loss=True,)
             
         quantized, indices, diversity_loss = q_outputs
         
-        # mask a portion of quantized
-        masked_z, mask, masked_indices = self.mask_input(z, self.params.mask_prob, 
+        # mask a portion of encoded
+        masked_encoded, mask, masked_indices = self.mask_input(encoded, self.params.mask_prob, 
                                                         self.params.mask_span,)
         
-        context_output = self.context(masked_z.transpose(2, 1))
+        context_output = self.context(masked_encoded.transpose(2, 1))
         context_output = context_output.transpose(2, 1)
         
-        return z, q_outputs, context_output, masked_indices
+        return masked_encoded, q_outputs, context_output, masked_indices
     
     def compute_gumbel_annealing_weight(self):
         end = self.params.annealing_weight_end
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
                   dropout_prob=params.dropout_prob, w2v_large=True)
     context = Conformer(
-        dim = 256,
+        dim = 512,
         depth = 12,          # 12 blocks
         dim_head = 64,
         heads = 8,

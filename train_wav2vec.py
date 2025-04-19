@@ -5,7 +5,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 from model.modules.encoder import Encoder, ContextNetwork
 from model.wav2vec import Wav2VecFeatureExtractor
 from model.utils.config import Wav2vecHyperParam
-from model.utils.loss import Wav2VecLoss
 
 import lightning as L
 from datasets import load_dataset

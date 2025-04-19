@@ -80,7 +80,8 @@ class Wav2VecLoss(nn.Module):
         
         total_loss = total_pos_loss + self.num_neg*total_neg_loss
         return -1 * total_pos_loss, -1 * total_neg_loss, -1 * total_loss
-    
+
+
 class Wav2Vec2Loss(nn.Module):
     def __init__(self, k_steps: int, num_neg: int, feat_dim: int,):
         super().__init__()
@@ -97,19 +98,19 @@ class Wav2Vec2Loss(nn.Module):
         loss = self.compute_contrastive_loss(feat_enc, feat_context, masked_indices)
         return loss
         
-    def compute_contrastive_loss(self, quantized: torch.tensor, c: torch.tensor, masked_indices):
+    def compute_contrastive_loss(self, quantized: torch.tensor, context: torch.tensor, masked_indices):
         """Futute time step prediction loss with negative contrastive loss
 
         Args:
-            z (torch.tensor): _description_
-            c (torch.tensor): _description_
+            quantized (torch.tensor): _description_
+            context (torch.tensor): _description_
 
         Returns:
             _type_: _description_
         """
         # num_neg is same as lambda_
         # z, c -> batch, channel, time
-            
+        # TODO: implement contrastive loss
         bs, channel, sample_len = quantized.size()
         total_loss = 0.0
 
