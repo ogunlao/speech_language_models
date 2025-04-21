@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class VQVAE_HyperParam:
-    """Class for keeping track of training and model hyperparameters of wav2vec."""
+    """Class for keeping track of training and model hyperparameters of VQVAE."""
     model_name: str = 'vq_vae'
     
     # encoder params
@@ -43,7 +43,7 @@ class VQVAE_HyperParam:
     
 @dataclass
 class Wav2vecHyperParam:
-    """Class for keeping track of training and model hyperparameters of wav2vec."""
+    """Class for keeping track of training and model hyperparameters of wav2vec"""
     model_name: str = 'w2v_small'
     
     # trainer hyperparams
@@ -65,13 +65,13 @@ class Wav2vecHyperParam:
     max_batch_len: int = 150_000
     
     # model params
-    feat_dim: int = 512
+    feat_dim: int = 30 # 512
     commitment_weight: float = 0.25
 
 
 @dataclass
 class VQ_Wav2vecHyperParam(Wav2vecHyperParam):
-    """Class for keeping track of training and model hyperparameters."""
+    """Class for keeping track of training and model hyperparameters of vq-Wav2vec."""
     model_name: str = 'w2v_large'
     codebook_size: int = 320
     num_groups: str = 2 # 2
@@ -124,11 +124,13 @@ class w2v_DiscreteBERTHyperParam(VQ_Wav2vecHyperParam):
 class w2v_ContinuousBERTHyperParam(w2v_DiscreteBERTHyperParam):
     """Class for keeping track of training and model hyperparameters."""
     model_name: str = 'w2v2_base'
-    bert_feat_dim: int = 30 # 768 def
+    bert_feat_dim: int = 512 # 768 def
+    clamped_logit_weight: int = 20.0
+
 
 @dataclass
 class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):
-    """Class for keeping track of training and model hyperparameters."""
+    """Class for keeping track of training and model hyperparameters of wav2vec2"""
     model_name: str = 'w2v2_base'
     contrastive_loss_temp: float = 0.1
     diversity_weight: float = 0.2
