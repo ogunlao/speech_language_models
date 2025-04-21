@@ -7,6 +7,7 @@ from .modules.encoder import Encoder, ContextNetwork
 from conformer import Conformer
 from .wav2vec import Wav2VecFeatureExtractor
 from .utils.config import Wav2vecHyperParam, w2v_ContinuousBERTHyperParam
+from .utils.loss import Wav2VecContBertLoss
 
 import lightning as L
 
@@ -23,7 +24,8 @@ class w2vContinuousBert(L.LightningModule):
         self.discrete_bert_loss_fn = nn.CrossEntropyLoss()
         self.linear_c = nn.Linear(self.params.feat_dim, self.params.bert_feat_dim)
         self.vocab_proj = nn.Linear(self.params.feat_dim, self.params.codebook_size)
-        self.clamped_logit_weight = self.params.clamped_logit_weight
+        self.loss_fn = Wav2VecContBertLoss(num_neg=self.params.num_neg, 
+                                        clamped_logit_weight=self.params.clamped_logit_weight)
 
     def mask_input(self, quantized, mask_prob, mask_span):
         B, C, q_len = quantized.size()
@@ -70,7 +72,6 @@ class w2vContinuousBert(L.LightningModule):
         
         return masked_quantized, mask
         
-        
     def forward(self, x):
         with torch.no_grad():
             _, w2v_feat = self.feat_ext(x)
@@ -94,8 +95,8 @@ class w2vContinuousBert(L.LightningModule):
         w2v_feat_proj, context_output, mask = self.forward(x)
         
         # compute cross entropy loss
-        train_loss, total_aux_loss = self.compute_masked_language_loss(w2v_feat_proj, 
-                                                       mask, context_output,)
+        train_loss, total_aux_loss = self.loss_fn(w2v_feat_proj, 
+                                                    mask, context_output,)
         
         total_loss = train_loss + total_aux_loss
         
@@ -111,68 +112,11 @@ class w2vContinuousBert(L.LightningModule):
         w2v_feat_proj, context_output, mask = self.forward(x)
         
         # compute cross entropy loss
-        val_loss, total_aux_loss = self.compute_masked_language_loss(w2v_feat_proj, 
-                                                       mask, context_output,)
-        total_loss = val_loss + total_aux_loss
+        val_loss, total_aux_loss = self.loss_fn(w2v_feat_proj, 
+                                                mask, context_output,)
+
         self.log_dict({"val_loss": val_loss,
                        "squared_logits_loss": total_aux_loss }, prog_bar=True)
-        
-    def compute_masked_language_loss(self, feat_proj, mask, context_output):
-        """Futute time step prediction loss with negative contrastive loss
-
-        Returns:
-            _type_: _description_
-        """
-        # TODO: Write loss for continuous bert
-        # positive sample: w2v feat sample
-        # negative samples: 10 other masked positions in the same sample and 
-        # 10 other masked positions in the same sample
-        
-        B, C, T = feat_proj.size()
-        total_loss, total_aux_loss = 0.0, 0.0
-
-        # select contrast samples, keep batch from w2v and context output
-        for batch in range(B):
-            mask_b = mask[batch, :] # T
-            masked_feat_b = feat_proj[batch].transpose(0, 1)[mask_b, :] # T, C
-            masked_context_b = context_output[batch].transpose(0, 1)[mask_b, :] # T, C
-            
-            
-            # positive_contrast_b = torch.sum(masked_feat_b * masked_context_b, dim=1) # T
-            
-            time = masked_context_b.size(0) 
-            for t in range(time):
-                masked_context_b_t = masked_context_b[t, :].unsqueeze(0) # C
-                masked_feat_b_t = masked_feat_b[t, :].unsqueeze(0) # C
-                
-                # sample 10 masked distractors from masked context for negative except index of pos
-                neg_feat = torch.cat([masked_feat_b[:t, :], masked_feat_b[t+1:, :]], axis=0)
-
-                p = torch.zeros((time-1, )).fill_(1/(time-1))
-                neg_indices = p.multinomial(num_samples=self.params.num_neg, replacement=False)
-                
-                # Gather negative samples
-                neg_feat_samples = torch.gather(neg_feat, dim=0, index=neg_indices.unsqueeze(1).repeat(1, C))  # (num_neg, channel)
-                pos_with_neg_feat = torch.cat([masked_feat_b_t, neg_feat_samples], dim=0) # (num_neg+1, channel)
-                
-                # Compute dot product for this time step
-                logits_b_t = masked_context_b_t @ pos_with_neg_feat.transpose(0, 1)  # (1, num_neg+1)
-                
-                # compute InfoNCE loss
-                # select the index for the positive dot product for timestep T
-                info_nce_loss_b_t = nn.functional.softmax(logits_b_t, dim=1)[0, 0]
-                
-                total_loss += info_nce_loss_b_t
-                
-                # Compute auxilliary loss
-                # aply soft clamp to logits
-                clamped_logits_b_t = self.clamped_logit_weight* torch.tanh(
-                    logits_b_t / self.clamped_logit_weight
-                    )
-                aux_squared_logits_sum = torch.sum(clamped_logits_b_t ** 2)
-                total_aux_loss += aux_squared_logits_sum
-        
-        return total_loss, total_aux_loss
 
     def configure_optimizers(self):
         # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936

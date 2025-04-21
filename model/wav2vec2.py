@@ -21,7 +21,9 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         self.quantizer = quantizer
         self.mask_embedding = torch.nn.Parameter(torch.randn(params.feat_dim))
         self.params = params
-        self.w2v2_loss_fn = Wav2Vec2Loss(params.k_steps, params.num_neg, params.feat_dim)
+        self.w2v2_loss_fn = Wav2Vec2Loss(params.k_steps, params.num_neg, 
+                                         params.feat_dim, params.softmax_weight,
+                                         )
         self.diversity_weight = params.diversity_weight
 
     def mask_input(self, quantized, mask_prob, mask_span):
@@ -34,12 +36,11 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         # expand to mask_span
         mask = torch.zeros((B, q_len), dtype=torch.bool,)
         for batch in range(B):
-            mask_starts = masked_index[batch]
-            if len(mask_starts) > 0:
-                starts = torch.tensor(mask_starts, dtype=torch.long,)
+            starts = masked_index[batch]
+            if len(starts) > 0:
                 offsets = torch.arange(mask_span + 1, dtype=torch.long)
                 time_indices = (starts.unsqueeze(-1) + offsets.unsqueeze(0)).flatten()
-                valid_indices = time_indices[(time_indices >= 0) & (time_indices < q_len)]
+                valid_indices = time_indices[(time_indices < q_len)]
                 if len(valid_indices) > 0:
                     mask[batch, valid_indices] = True
                     
@@ -50,7 +51,6 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         masked_quantized = torch.where(mask_expanded, fill_expanded.expand_as(masked_quantized), masked_quantized)
         
         return masked_quantized, mask, masked_index
-        
         
     def forward(self, x):
         encoded = self.encoder(x)
@@ -67,7 +67,7 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
         context_output = self.context(masked_encoded.transpose(2, 1))
         context_output = context_output.transpose(2, 1)
         
-        return masked_encoded, q_outputs, context_output, masked_indices
+        return masked_encoded, q_outputs, context_output, mask
     
     def compute_gumbel_annealing_weight(self):
         end = self.params.annealing_weight_end
@@ -85,11 +85,11 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
     def training_step(self, batch, batch_idx):
         
         x = batch["audio"]
-        encoded, q_outputs, context_output, masked_indices = self.forward(x)
+        encoded, q_outputs, context_output, mask = self.forward(x)
         quantized, indices, diversity_loss = q_outputs
         
         # compute wav2vec loss
-        w2v2_loss = self.w2v2_loss_fn(quantized, context_output, masked_indices)
+        w2v2_loss = self.w2v2_loss_fn(quantized, context_output, mask)
         
         total_loss = w2v2_loss + self.diversity_weight * diversity_loss
         
@@ -140,7 +140,7 @@ class Wav2Vec2FeatureExtractor(L.LightningModule):
 if __name__ == "__main__":
     params = Wav2vec2HyperParam()
     x = torch.rand(2, 1, 16000*5) # Two random noises of 5 seconds 
-    encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+    encoder = Encoder(5, 512, [(10, 5), (3, 2), (3, 2), (3, 2), (3, 2), (2, 2), (2, 2)], 
                   dropout_prob=params.dropout_prob, w2v_large=True)
     context = Conformer(
         dim = 512,

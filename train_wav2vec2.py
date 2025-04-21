@@ -56,7 +56,7 @@ dev_loader = DataLoader(dev_dataset, batch_size=params.val_batch_size,
                         shuffle=False, collate_fn=collate_fn,)
 
 # model
-encoder = Encoder(5, 512, [(10, 5), (8, 4), (4, 2), (4, 2), (4, 2)], 
+encoder = Encoder(5, params.feat_dim, [(10, 5), (3, 2), (3, 2), (3, 2), (3, 2), (2, 2), (2, 2)], 
                   dropout_prob=params.dropout_prob,
                     w2v_large=True if params.model_name=="w2v_large" else False)
 context = Conformer(

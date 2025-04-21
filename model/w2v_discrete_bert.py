@@ -8,6 +8,7 @@ from conformer import Conformer
 from .vq_wav2vec import VQ_Wav2VecFeatureExtractor
 from .modules.quantizer import VQ
 from .utils.config import VQ_Wav2vecHyperParam, w2v_DiscreteBERTHyperParam
+from .utils.loss import Wav2VecDiscreteBertLoss
 
 import lightning as L
 
@@ -21,8 +22,7 @@ class w2vDiscreteBert(L.LightningModule):
         self.context_network = context_network
         self.mask_embedding = nn.Parameter(torch.randn(params.feat_dim))
         self.params = params
-        self.discrete_bert_loss_fn = nn.CrossEntropyLoss()
-        self.vocab_proj = nn.Linear(self.params.feat_dim, self.params.codebook_size)
+        self.loss_fn = Wav2VecDiscreteBertLoss(self.params.feat_dim, self.params.codebook_size)
 
     def mask_input(self, quantized, mask_prob, mask_span):
         B, C, q_len = quantized.size()
@@ -69,7 +69,6 @@ class w2vDiscreteBert(L.LightningModule):
         
         return masked_quantized, mask
         
-        
     def forward(self, x):
         with torch.no_grad():
             encoded = self.feat_ext.encoder(x)
@@ -87,29 +86,6 @@ class w2vDiscreteBert(L.LightningModule):
         
         return encoded, q_outputs, context_output, mask
     
-    def compute_masked_language_loss(self, quantized, indices, mask, context_output,):
-        
-        # compute dicretebert loss by predicting the masked index
-        # mask (B, T)
-        B, C, T = quantized.size()
-        
-        # select masked indices
-        masked_indices = indices[mask]
-        
-        # select masked context vectors
-        mask = mask.view(B, T)
-        context_output = context_output.transpose(2, 1).view(-1, C)
-        predicted = context_output[mask.view(-1), :]
-        
-        
-        # project samples to size of codebode
-        predicted_proj = self.vocab_proj(predicted)
-        
-        # compute cross entropy loss
-        loss = self.discrete_bert_loss_fn(predicted_proj, masked_indices)
-        
-        return loss
-    
     def training_step(self, batch, batch_idx):
         
         x = batch["audio"]
@@ -117,8 +93,7 @@ class w2vDiscreteBert(L.LightningModule):
         quantized, indices = q_outputs
         
         # compute cross entropy loss
-        train_loss = self.compute_masked_language_loss(quantized, indices, 
-                                                       mask, context_output,)
+        train_loss = self.loss_fn(quantized, indices, mask, context_output,)
         
         self.log_dict({"train_loss": train_loss, }, prog_bar=True)
 
@@ -131,13 +106,11 @@ class w2vDiscreteBert(L.LightningModule):
         quantized, indices = q_outputs
         
         # compute cross entropy loss
-        val_loss = self.compute_masked_language_loss(quantized, indices, 
-                                                       mask, context_output,)
+        val_loss = self.loss_fn(quantized, indices, mask, context_output,)
         
         self.log_dict({"val_w2v2_loss": val_loss,}, prog_bar=True)
 
     def configure_optimizers(self):
-        # implement cosine annealing with warm up from https://stackoverflow.com/a/75089936
         
         optimizer = torch.optim.Adam(self.parameters(), 
                                         lr=self.params.lr,)

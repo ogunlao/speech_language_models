@@ -134,9 +134,10 @@ class Wav2vec2HyperParam(VQ_Wav2vecHyperParam):
     model_name: str = 'w2v2_base'
     contrastive_loss_temp: float = 0.1
     diversity_weight: float = 0.2
+    softmax_weight: float = 1.0
     use_gumbel: bool = True
     max_batch_len: int = 150_000
-    num_neg: int = 100
+    num_neg: int = 100 # 100
     
     # masking params
     mask_span: int = 10
